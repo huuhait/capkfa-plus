@@ -14,6 +14,10 @@ add_executable(DXGICapture main.cpp
         FrameCapturer.cpp
         FrameCapturer.h
         Utils.h
+        FrameSlot.cpp
+        FrameSlot.h
+        FrameHandler.cpp
+        FrameHandler.h
 )
 
 # Link libraries

@@ -2,7 +2,10 @@
   "name": "dxgi-capture",
   "version": "0.1.0",
   "dependencies": [
-    "opencv",
+    {
+      "name": "opencv",
+      "features": ["opencl"]
+    },
     "bext-di"
   ]
 }

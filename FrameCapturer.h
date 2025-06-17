@@ -6,23 +6,35 @@
 #include <opencv2/opencv.hpp>
 #include <wrl/client.h>
 #include <string>
+#include <thread>
+#include <atomic>
+#include <memory>
 
 using Microsoft::WRL::ComPtr;
 
+class FrameSlot;
+
 class FrameCapturer {
 public:
-    FrameCapturer(ComPtr<IDXGIOutput1> output1, ComPtr<ID3D11Device> device, ComPtr<ID3D11DeviceContext> context, UINT outputIndex);
+    FrameCapturer(ComPtr<IDXGIOutput1> output1, ComPtr<ID3D11Device> device, ComPtr<ID3D11DeviceContext> context, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot);
     ~FrameCapturer();
     void StartCapture();
+    void StopCapture();
 
 private:
+    void CaptureLoop();
+
     ComPtr<IDXGIOutput1> output1_;
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
     ComPtr<ID3D11Texture2D> stagingTexture_;
-    cv::UMat frame_;
+    cv::UMat frame_; // Reverted to UMat
     UINT outputIndex_;
     int refreshRate_;
     UINT timeoutMs_;
+    std::shared_ptr<FrameSlot> frameSlot_;
+    std::thread captureThread_;
+    std::atomic<bool> isCapturing_;
 };
+
 #endif

@@ -1,12 +1,13 @@
 #include "FrameCapturer.h"
+#include "FrameSlot.h"
 #include "Utils.h"
+#include <opencv2/core/ocl.hpp>
 #include <iostream>
 #include <vector>
-#include <thread>
 #include <chrono>
 #include <windows.h>
+#include <fstream>
 
-// Link required libraries
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "comsuppw.lib")
@@ -18,7 +19,7 @@ int GetMonitorRefreshRate(ComPtr<IDXGIOutput> output) {
     modes.resize(numModes);
     CheckHRESULT(output->GetDisplayModeList(DXGI_FORMAT_B8G8R8A8_UNORM, 0, &numModes, modes.data()), "GetDisplayModeList");
 
-    int maxRefreshRate = 60; // Default fallback
+    int maxRefreshRate = 60;
     for (const auto& mode : modes) {
         int refreshRate = mode.RefreshRate.Numerator / mode.RefreshRate.Denominator;
         if (refreshRate > maxRefreshRate) {
@@ -29,26 +30,26 @@ int GetMonitorRefreshRate(ComPtr<IDXGIOutput> output) {
     return maxRefreshRate;
 }
 
-FrameCapturer::FrameCapturer(ComPtr<IDXGIOutput1> output1, ComPtr<ID3D11Device> device, ComPtr<ID3D11DeviceContext> context, UINT outputIndex)
-    : output1_(output1), device_(device), context_(context), outputIndex_(outputIndex) {
-    // Validate output dimensions
+FrameCapturer::FrameCapturer(ComPtr<IDXGIOutput1> output1, ComPtr<ID3D11Device> device, ComPtr<ID3D11DeviceContext> context, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot)
+    : output1_(output1), device_(device), context_(context), outputIndex_(outputIndex), frameSlot_(frameSlot), isCapturing_(false) {
     DXGI_OUTPUT_DESC outputDesc;
     CheckHRESULT(output1_->GetDesc(&outputDesc), "GetDesc");
     int width = outputDesc.DesktopCoordinates.right - outputDesc.DesktopCoordinates.left;
     int height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
+    std::cout << "Monitor size: " << width << "x" << height << ", capturing region: ["
+              << (width/2 - 250) << "," << (height/2 - 250) << "] to ["
+              << (width/2 + 250) << "," << (height/2 + 250) << "]" << std::endl;
 
     if (width < 500 || height < 500) {
         throw std::runtime_error("Output " + std::to_string(outputIndex_) + " too small for 500x500 capture");
     }
 
-    // Get refresh rate and set dynamic timeout
     ComPtr<IDXGIOutput> output;
     CheckHRESULT(output1_->QueryInterface(IID_PPV_ARGS(&output)), "QueryInterface IDXGIOutput");
     refreshRate_ = GetMonitorRefreshRate(output);
-    timeoutMs_ = std::max(1U, static_cast<UINT>(1000 / refreshRate_)); // Dynamic timeout
+    timeoutMs_ = std::max(1U, static_cast<UINT>(1000 / refreshRate_));
     std::cout << "Output " << outputIndex_ << ": " << refreshRate_ << "Hz, timeout " << timeoutMs_ << "ms" << std::endl;
 
-    // Create staging texture
     D3D11_TEXTURE2D_DESC stagingDesc = {};
     stagingDesc.Width = 500;
     stagingDesc.Height = 500;
@@ -60,63 +61,70 @@ FrameCapturer::FrameCapturer(ComPtr<IDXGIOutput1> output1, ComPtr<ID3D11Device> 
     stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     CheckHRESULT(device_->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture_), "CreateTexture2D");
 
-    // Initialize OpenCV UMat
-    frame_ = cv::UMat(500, 500, CV_8UC4);
+    frame_ = cv::UMat(500, 500, CV_8UC4); // Reverted to UMat
 }
 
-FrameCapturer::~FrameCapturer() {}
+FrameCapturer::~FrameCapturer() {
+    StopCapture();
+}
 
 void FrameCapturer::StartCapture() {
+    if (!isCapturing_) {
+        isCapturing_ = true;
+        captureThread_ = std::thread(&FrameCapturer::CaptureLoop, this);
+    }
+}
+
+void FrameCapturer::StopCapture() {
+    if (isCapturing_) {
+        isCapturing_ = false;
+        if (captureThread_.joinable()) {
+            captureThread_.join();
+        }
+    }
+}
+
+void FrameCapturer::CaptureLoop() {
     int frameCount = 0;
     auto lastTime = std::chrono::steady_clock::now();
-    bool capturing = true;
-    std::vector<float> frameTimes; // For variance
+    std::vector<float> frameTimes;
     ComPtr<IDXGIOutputDuplication> duplication;
 
-    // Cache duplication object
     HRESULT hr = output1_->DuplicateOutput(device_.Get(), &duplication);
     if (FAILED(hr)) {
         std::cerr << "Initial DuplicateOutput failed: " << _com_error(hr).ErrorMessage() << std::endl;
+        isCapturing_ = false;
         return;
     }
 
-    while (capturing) {
+    while (isCapturing_) {
         auto frameStart = std::chrono::steady_clock::now();
 
         DXGI_OUTDUPL_FRAME_INFO frameInfo;
         ComPtr<IDXGIResource> desktopResource;
-        auto acquireStart = std::chrono::steady_clock::now();
         hr = duplication->AcquireNextFrame(timeoutMs_, &frameInfo, &desktopResource);
-        auto acquireEnd = std::chrono::steady_clock::now();
         if (hr == DXGI_ERROR_ACCESS_LOST) {
-            // Reinitialize duplication
             hr = output1_->DuplicateOutput(device_.Get(), &duplication);
             if (FAILED(hr)) {
                 std::cerr << "Reinit DuplicateOutput failed: " << _com_error(hr).ErrorMessage() << std::endl;
-                std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Exponential backoff
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
             continue;
         }
         if (hr == DXGI_ERROR_DEVICE_REMOVED) {
             std::cerr << "Device removed: " << _com_error(hr).ErrorMessage() << std::endl;
+            isCapturing_ = false;
             return;
         }
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-            continue; // Skip sleep to reduce latency
+            continue;
         }
         if (FAILED(hr)) continue;
-
-        // Log Acquire time if high
-        auto acquireTime = std::chrono::duration_cast<std::chrono::microseconds>(acquireEnd - acquireStart).count() / 1000.0;
-        if (acquireTime > 1.0) {
-            // std::cout << "High Acquire time: " << acquireTime << "ms" << std::endl;
-        }
 
         ComPtr<ID3D11Texture2D> desktopTexture;
         CheckHRESULT(desktopResource->QueryInterface(IID_PPV_ARGS(&desktopTexture)), "QueryInterface Texture2D");
 
-        // Validate desktop texture format
         D3D11_TEXTURE2D_DESC desc;
         desktopTexture->GetDesc(&desc);
         if (desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
@@ -125,7 +133,6 @@ void FrameCapturer::StartCapture() {
             continue;
         }
 
-        // Define 500x500 centered region
         int x_center = desc.Width / 2;
         int y_center = desc.Height / 2;
         D3D11_BOX srcBox = {
@@ -137,41 +144,91 @@ void FrameCapturer::StartCapture() {
             1
         };
 
-        // Copy 500x500 region
         context_->CopySubresourceRegion(stagingTexture_.Get(), 0, 0, 0, 0, desktopTexture.Get(), 0, &srcBox);
 
         D3D11_MAPPED_SUBRESOURCE mapped;
         CheckHRESULT(context_->Map(stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map");
 
-        // Copy directly to UMat data
-        uint8_t* src = (uint8_t*)mapped.pData;
-        uint8_t* dst = frame_.getMat(cv::ACCESS_WRITE).data;
-        if (mapped.RowPitch == 500 * 4) {
-            memcpy(dst, src, 500 * 500 * 4);
-        } else {
-            for (int i = 0; i < 500; ++i) {
-                memcpy(dst + i * 500 * 4, src + i * mapped.RowPitch, 500 * 4);
-            }
-        }
-        context_->Unmap(stagingTexture_.Get(), 0);
-
-        if (frame_.empty()) {
-            std::cerr << "Empty frame for output " << outputIndex_ << std::endl;
+        if (mapped.pData == nullptr) {
+            std::cerr << "Mapped data is null" << std::endl;
+            context_->Unmap(stagingTexture_.Get(), 0);
             duplication->ReleaseFrame();
             continue;
         }
 
-        // Remove artificial frame cap to reduce stalls
+        uint8_t* src = (uint8_t*)mapped.pData;
+        cv::Mat temp(500, 500, CV_8UC4); // Temporary Mat for CPU copy
+        uint8_t* dst = temp.data;
+        bool allZero = true;
+        if (mapped.RowPitch == 500 * 4) {
+            memcpy(dst, src, 500 * 500 * 4);
+            for (size_t i = 0; i < 500 * 500 * 4; ++i) {
+                if (dst[i] != 0) {
+                    allZero = false;
+                    break;
+                }
+            }
+        } else {
+            for (int i = 0; i < 500; ++i) {
+                memcpy(dst + i * 500 * 4, src + i * mapped.RowPitch, 500 * 4);
+            }
+            for (size_t i = 0; i < 500 * 500 * 4; ++i) {
+                if (dst[i] != 0) {
+                    allZero = false;
+                    break;
+                }
+            }
+        }
+        context_->Unmap(stagingTexture_.Get(), 0);
+
+        if (allZero) {
+            std::cerr << "Captured frame data is all zeros" << std::endl;
+            duplication->ReleaseFrame();
+            continue;
+        }
+
+        temp.copyTo(frame_); // Copy to UMat
+        cv::ocl::finish(); // Synchronize OpenCL
+
+        if (frame_.empty()) {
+            std::cerr << "Captured frame is empty" << std::endl;
+            duplication->ReleaseFrame();
+            continue;
+        }
+
+        static bool saved = false;
+        if (!saved) {
+            cv::Mat mat;
+            frame_.copyTo(mat);
+            if (!mat.empty()) {
+                cv::imwrite("debug_capture.png", mat);
+                saved = true;
+                std::cout << "Saved debug_capture.png" << std::endl;
+            }
+        }
+        static bool savedRaw = false;
+        if (!savedRaw) {
+            cv::Mat mat;
+            frame_.copyTo(mat);
+            if (!mat.empty()) {
+                std::ofstream out("debug_raw_pixels.bin", std::ios::binary);
+                out.write(reinterpret_cast<char*>(mat.data), 500 * 500 * 4);
+                out.close();
+                savedRaw = true;
+                std::cout << "Saved debug_raw_pixels.bin" << std::endl;
+            }
+        }
+
+        frameSlot_->StoreFrame(frame_);
+
         auto frameEnd = std::chrono::steady_clock::now();
         auto frameDuration = std::chrono::duration_cast<std::chrono::microseconds>(frameEnd - frameStart).count();
         frameTimes.push_back(frameDuration / 1000.0f);
 
-        // Check for 'Q' key to exit
         if (GetAsyncKeyState('Q') & 0x8000) {
-            capturing = false;
+            isCapturing_ = false;
         }
 
-        // Calculate FPS and variance
         frameCount++;
         auto currentTime = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();

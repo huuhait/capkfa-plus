@@ -1,19 +1,20 @@
 #include "FrameCapturer.h"
+#include "FrameHandler.h"
+#include "FrameSlot.h"
 #include "Utils.h"
 #include <dxgi1_2.h>
 #include <d3d11.h>
 #include <iostream>
 #include <wrl/client.h>
+#include <memory>
 
 using Microsoft::WRL::ComPtr;
 
 int main() {
     try {
-        // Create DXGI factory
         ComPtr<IDXGIFactory1> factory;
         CheckHRESULT(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "CreateDXGIFactory1");
 
-        // D3D11 device and context
         ComPtr<ID3D11Device> device;
         ComPtr<ID3D11DeviceContext> context;
         D3D_FEATURE_LEVEL featureLevel;
@@ -21,7 +22,6 @@ int main() {
                                        D3D11_SDK_VERSION, &device, &featureLevel, &context),
                      "D3D11CreateDevice");
 
-        // Test single output
         ComPtr<IDXGIAdapter1> adapter;
         CheckHRESULT(factory->EnumAdapters1(0, &adapter), "EnumAdapters1");
         ComPtr<IDXGIOutput> output;
@@ -29,9 +29,19 @@ int main() {
         ComPtr<IDXGIOutput1> output1;
         CheckHRESULT(output->QueryInterface(IID_PPV_ARGS(&output1)), "QueryInterface IDXGIOutput1");
 
-        // Create and run capturer
-        FrameCapturer capturer(output1, device, context, 0);
+        auto frameSlot = std::make_shared<FrameSlot>();
+        FrameCapturer capturer(output1, device, context, 0, frameSlot);
+        FrameHandler handler(frameSlot, 0);
+
         capturer.StartCapture();
+        handler.Start();
+
+        while (!(GetAsyncKeyState('Q') & 0x8000)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        capturer.StopCapture();
+        handler.Stop();
     }
     catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
