@@ -6,6 +6,7 @@
       "name": "opencv",
       "features": ["opencl"]
     },
+    "boost",
     "bext-di"
   ]
 }

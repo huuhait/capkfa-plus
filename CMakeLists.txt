@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Dependencies from vcpkg
 find_package(OpenCV REQUIRED)
+find_package(Boost REQUIRED)
 find_path(BEXT_DI_INCLUDE_DIRS "boost/di.hpp")
 
 # Add executable
