@@ -15,6 +15,8 @@ endif()
 
 # Dependencies from vcpkg
 find_package(OpenCV REQUIRED)
+find_package(boost_asio REQUIRED CONFIG)
+find_package(boost_system REQUIRED CONFIG)
 find_package(Protobuf REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 find_package(LLVM REQUIRED CONFIG)
@@ -63,8 +65,6 @@ add_executable(DXGICapture
         Utils.h
         Frame/FrameSlot.cpp
         Frame/FrameSlot.h
-        Frame/FrameHandler.cpp
-        Frame/FrameHandler.h
         Frame/DeviceManager.cpp
         Frame/DeviceManager.h
         License/LicenseClient.cpp
@@ -73,25 +73,42 @@ add_executable(DXGICapture
         App.h
         License/Certificates.h
         License/certificates.rc
+        Logic/Colorbot.cpp
+        Logic/Colorbot.h
+        Logic/LogicManager.cpp
+        Logic/LogicManager.h
+        Movement/CommanderClient.cpp
+        Movement/CommanderClient.h
+        Movement/KeyWatcher.cpp
+        Movement/KeyWatcher.h
+        Movement/Km.cpp
+        Movement/Km.h
 )
 
 # Link libraries
 target_link_libraries(DXGICapture PRIVATE
         d3d11
         dxgi
+        ws2_32
+        mswsock
         protobuf::libprotoc
         protobuf::libprotobuf
         gRPC::grpc
         gRPC::grpc++
         ${OpenCV_LIBS}
+        Boost::asio
+        Boost::system
 )
 
 # Include directories
 target_include_directories(DXGICapture PRIVATE
         ${OpenCV_INCLUDE_DIRS}
+        ${Boost_INCLUDE_DIRS}
         ${BEXT_DI_INCLUDE_DIRS}
         ${Protobuf_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/proto
         ${CMAKE_CURRENT_BINARY_DIR}/proto # For generated headers
         ${CMAKE_CURRENT_BINARY_DIR}
 )
+
+add_definitions(-DWIN32_LEAN_AND_MEAN)

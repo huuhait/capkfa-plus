@@ -30,31 +30,20 @@ int GetMonitorRefreshRate(ComPtr<IDXGIOutput> output) {
     return maxRefreshRate;
 }
 
-FrameCapturer::FrameCapturer(const DeviceManager& deviceManager, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot)
+FrameCapturer::FrameCapturer(const DeviceManager& deviceManager, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot, std::shared_ptr<KeyWatcher> keyWatcher)
     : output1_(deviceManager.GetOutput()), device_(deviceManager.GetDevice()), context_(deviceManager.GetContext()),
-      outputIndex_(outputIndex), frameSlot_(frameSlot), isCapturing_(false) {
-    // Rest of the constructor remains unchanged
-    DXGI_OUTPUT_DESC outputDesc;
-    CheckHRESULT(output1_->GetDesc(&outputDesc), "GetDesc");
-    int width = outputDesc.DesktopCoordinates.right - outputDesc.DesktopCoordinates.left;
-    int height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
-    std::cout << "Monitor size: " << width << "x" << height << ", capturing region: ["
-              << (width/2 - 250) << "," << (height/2 - 250) << "] to ["
-              << (width/2 + 250) << "," << (height/2 + 250) << "]" << std::endl;
+      outputIndex_(outputIndex), frameSlot_(frameSlot), keyWatcher_(keyWatcher), isCapturing_(false), captureWidth_(0), captureHeight_(0),
+      offsetX_(0), offsetY_(0), refreshRate_(0), timeoutMs_(0) {
+}
 
-    if (width < 500 || height < 500) {
-        throw std::runtime_error("Output " + std::to_string(outputIndex_) + " too small for 500x500 capture");
-    }
+FrameCapturer::~FrameCapturer() {
+    StopCapture();
+}
 
-    ComPtr<IDXGIOutput> output;
-    CheckHRESULT(output1_->QueryInterface(IID_PPV_ARGS(&output)), "QueryInterface IDXGIOutput");
-    refreshRate_ = GetMonitorRefreshRate(output);
-    timeoutMs_ = std::max(1U, static_cast<UINT>(1000 / refreshRate_));
-    std::cout << "Output " << outputIndex_ << ": " << refreshRate_ << "Hz, timeout " << timeoutMs_ << "ms" << std::endl;
-
+void FrameCapturer::CreateStagingTexture() {
     D3D11_TEXTURE2D_DESC stagingDesc = {};
-    stagingDesc.Width = 500;
-    stagingDesc.Height = 500;
+    stagingDesc.Width = captureWidth_;
+    stagingDesc.Height = captureHeight_;
     stagingDesc.MipLevels = 1;
     stagingDesc.ArraySize = 1;
     stagingDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -62,16 +51,54 @@ FrameCapturer::FrameCapturer(const DeviceManager& deviceManager, UINT outputInde
     stagingDesc.Usage = D3D11_USAGE_STAGING;
     stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     CheckHRESULT(device_->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture_), "CreateTexture2D");
-
-    frame_ = cv::UMat(500, 500, CV_8UC4);
 }
 
-FrameCapturer::~FrameCapturer() {
+void FrameCapturer::SetConfig(const ::capkfa::RemoteConfig& config) {
+    int width = config.aim().fov();
+    int height = config.aim().fov();
+
+    if (width <= 0 || height <= 0) {
+        throw std::runtime_error("Invalid capture size: " + std::to_string(width) + "x" + std::to_string(height));
+    }
+
     StopCapture();
+
+    DXGI_OUTPUT_DESC outputDesc;
+    CheckHRESULT(output1_->GetDesc(&outputDesc), "GetDesc");
+    int monitorWidth = outputDesc.DesktopCoordinates.right - outputDesc.DesktopCoordinates.left;
+    int monitorHeight = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
+
+    if (monitorWidth < width || monitorHeight < height) {
+        throw std::runtime_error("Capture size " + std::to_string(width) + "x" + std::to_string(height) +
+                                 " exceeds monitor dimensions " + std::to_string(monitorWidth) + "x" + std::to_string(monitorHeight));
+    }
+
+    captureWidth_ = width;
+    captureHeight_ = height;
+    offsetX_ = (monitorWidth - captureWidth_) / 2;
+    offsetY_ = (monitorHeight - captureHeight_) / 2;
+
+    ComPtr<IDXGIOutput> output;
+    CheckHRESULT(output1_->QueryInterface(IID_PPV_ARGS(&output)), "QueryInterface IDXGIOutput");
+    refreshRate_ = GetMonitorRefreshRate(output);
+    timeoutMs_ = std::max(1U, static_cast<UINT>(1000 / refreshRate_));
+
+    stagingTexture_.Reset();
+    CreateStagingTexture();
+    frame_ = cv::UMat(captureHeight_, captureWidth_, CV_8UC4);
+
+    std::cout << "Capture config set: size " << captureWidth_ << "x" << captureHeight_
+              << ", centered offset (" << offsetX_ << "," << offsetY_ << "), "
+              << refreshRate_ << "Hz, timeout " << timeoutMs_ << "ms" << std::endl;
+
+    StartCapture();
 }
 
 void FrameCapturer::StartCapture() {
     if (!isCapturing_) {
+        if (frame_.empty()) {
+            std::cerr << "Warning: FrameCapturer not configured. Call SetConfig to enable capture." << std::endl;
+        }
         isCapturing_ = true;
         captureThread_ = std::thread(&FrameCapturer::CaptureLoop, this);
     }
@@ -83,6 +110,9 @@ void FrameCapturer::StopCapture() {
         if (captureThread_.joinable()) {
             captureThread_.join();
         }
+        // Clear resources
+        stagingTexture_.Reset();
+        frame_ = cv::UMat();
     }
 }
 
@@ -92,26 +122,30 @@ void FrameCapturer::CaptureLoop() {
     std::vector<float> frameTimes;
     ComPtr<IDXGIOutputDuplication> duplication;
 
-    HRESULT hr = output1_->DuplicateOutput(device_.Get(), &duplication);
-    if (FAILED(hr)) {
-        std::cerr << "Initial DuplicateOutput failed: " << _com_error(hr).ErrorMessage() << std::endl;
-        isCapturing_ = false;
-        return;
-    }
-
     while (isCapturing_) {
+        if (frame_.empty()) {
+            continue; // Skip if not configured
+        }
+
+        if (!keyWatcher_->IsCaptureKeyDown()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+
         auto frameStart = std::chrono::steady_clock::now();
+
+        HRESULT hr = duplication ? S_OK : output1_->DuplicateOutput(device_.Get(), &duplication);
+        if (FAILED(hr)) {
+            std::cerr << "Initial DuplicateOutput failed: " << _com_error(hr).ErrorMessage() << std::endl;
+            isCapturing_ = false;
+            return;
+        }
 
         DXGI_OUTDUPL_FRAME_INFO frameInfo;
         ComPtr<IDXGIResource> desktopResource;
         hr = duplication->AcquireNextFrame(timeoutMs_, &frameInfo, &desktopResource);
         if (hr == DXGI_ERROR_ACCESS_LOST) {
-            hr = output1_->DuplicateOutput(device_.Get(), &duplication);
-            if (FAILED(hr)) {
-                std::cerr << "Reinit DuplicateOutput failed: " << _com_error(hr).ErrorMessage() << std::endl;
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
-            }
+            duplication.Reset();
             continue;
         }
         if (hr == DXGI_ERROR_DEVICE_REMOVED) {
@@ -119,10 +153,9 @@ void FrameCapturer::CaptureLoop() {
             isCapturing_ = false;
             return;
         }
-        if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT || FAILED(hr)) {
             continue;
         }
-        if (FAILED(hr)) continue;
 
         ComPtr<ID3D11Texture2D> desktopTexture;
         CheckHRESULT(desktopResource->QueryInterface(IID_PPV_ARGS(&desktopTexture)), "QueryInterface Texture2D");
@@ -135,14 +168,12 @@ void FrameCapturer::CaptureLoop() {
             continue;
         }
 
-        int x_center = desc.Width / 2;
-        int y_center = desc.Height / 2;
         D3D11_BOX srcBox = {
-            static_cast<UINT>(x_center - 250),
-            static_cast<UINT>(y_center - 250),
+            static_cast<UINT>(offsetX_),
+            static_cast<UINT>(offsetY_),
             0,
-            static_cast<UINT>(x_center + 250),
-            static_cast<UINT>(y_center + 250),
+            static_cast<UINT>(offsetX_ + captureWidth_),
+            static_cast<UINT>(offsetY_ + captureHeight_),
             1
         };
 
@@ -159,22 +190,22 @@ void FrameCapturer::CaptureLoop() {
         }
 
         uint8_t* src = (uint8_t*)mapped.pData;
-        cv::Mat temp(500, 500, CV_8UC4); // Temporary Mat for CPU copy
+        cv::Mat temp(captureHeight_, captureWidth_, CV_8UC4);
         uint8_t* dst = temp.data;
         bool allZero = true;
-        if (mapped.RowPitch == 500 * 4) {
-            memcpy(dst, src, 500 * 500 * 4);
-            for (size_t i = 0; i < 500 * 500 * 4; ++i) {
+        if (mapped.RowPitch == captureWidth_ * 4) {
+            memcpy(dst, src, captureWidth_ * captureHeight_ * 4);
+            for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
                 if (dst[i] != 0) {
                     allZero = false;
                     break;
                 }
             }
         } else {
-            for (int i = 0; i < 500; ++i) {
-                memcpy(dst + i * 500 * 4, src + i * mapped.RowPitch, 500 * 4);
+            for (int i = 0; i < captureHeight_; ++i) {
+                memcpy(dst + i * captureWidth_ * 4, src + i * mapped.RowPitch, captureWidth_ * 4);
             }
-            for (size_t i = 0; i < 500 * 500 * 4; ++i) {
+            for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
                 if (dst[i] != 0) {
                     allZero = false;
                     break;
@@ -189,8 +220,8 @@ void FrameCapturer::CaptureLoop() {
             continue;
         }
 
-        temp.copyTo(frame_); // Copy to UMat
-        cv::ocl::finish(); // Synchronize OpenCL
+        temp.copyTo(frame_);
+        cv::ocl::finish();
 
         if (frame_.empty()) {
             std::cerr << "Captured frame is empty" << std::endl;

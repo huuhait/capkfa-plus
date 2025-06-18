@@ -1,20 +1,24 @@
-#ifndef FRAME_HANDLER_H
-#define FRAME_HANDLER_H
+#ifndef COLORBOT_H
+#define COLORBOT_H
 
 #include <memory>
 #include <thread>
 #include <atomic>
 #include <windows.h>
-#include <cstdint>
+#include <license.grpc.pb.h>
 #include <opencv2/opencv.hpp>
-#include "FrameSlot.h"
 
-class FrameHandler {
+#include "../Frame/FrameSlot.h"
+#include "../Movement/KeyWatcher.h"
+#include "../Movement/Km.h"
+
+class Colorbot {
 public:
-    FrameHandler(std::shared_ptr<FrameSlot> frameSlot, UINT outputIndex);
-    ~FrameHandler();
+    Colorbot(std::shared_ptr<FrameSlot> frameSlot, std::shared_ptr<KeyWatcher> keyWatcher, std::shared_ptr<Km> km);
+    ~Colorbot();
     void Start();
     void Stop();
+    void SetConfig(const ::capkfa::RemoteConfig& config);
 
 private:
     void ProcessLoop();
@@ -24,14 +28,15 @@ private:
     void DisplayFrame(const cv::UMat& frame, const std::string& windowName);
 
     std::shared_ptr<FrameSlot> frameSlot_;
+    std::shared_ptr<KeyWatcher> keyWatcher_;
+    std::shared_ptr<Km> km_;
+
     UINT outputIndex_;
     std::thread handlerThread_;
     std::atomic<bool> isRunning_;
     uint64_t lastFrameVersion_;
     cv::UMat bgrFrame_;
     cv::UMat hsvFrame_;
-    cv::UMat mask1_;
-    cv::UMat mask2_;
     cv::UMat mask_;
 };
 

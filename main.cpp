@@ -2,9 +2,10 @@
 #include <boost/di.hpp>
 #include <iostream>
 #include <windows.h>
-
 #include "Frame/FrameCapturer.h"
-#include "Frame/FrameHandler.h"
+#include "Movement/CommanderClient.h"
+#include "Movement/KeyWatcher.h"
+#include "Movement/Km.h"
 
 namespace di = boost::di;
 
@@ -12,12 +13,16 @@ int main() {
     try {
         // Create and store DI injector
         const auto injector = di::make_injector(
+            di::bind<CommanderClient>().to(std::make_shared<CommanderClient>()),
             di::bind<DeviceManager>().to<DeviceManager>(),
             di::bind<FrameSlot>().to(std::make_shared<FrameSlot>()),
             di::bind<LicenseClient>().to<LicenseClient>(),
             di::bind<UINT>().to(0U), // Output index
             di::bind<FrameCapturer>().to<FrameCapturer>(),
-            di::bind<FrameHandler>().to<FrameHandler>()
+            di::bind<Colorbot>().to<Colorbot>(),
+            di::bind<LogicManager>().to<LogicManager>(),
+            di::bind<Km>().to<Km>(),
+            di::bind<KeyWatcher>().to<KeyWatcher>()
         );
 
         // Resolve App

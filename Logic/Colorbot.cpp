@@ -1,0 +1,153 @@
+#include "Colorbot.h"
+#include <opencv2/opencv.hpp>
+#include <opencv2/core/ocl.hpp>
+#include <iostream>
+#include <chrono>
+
+Colorbot::Colorbot(std::shared_ptr<FrameSlot> frameSlot, std::shared_ptr<KeyWatcher> keyWatcher, std::shared_ptr<Km> km)
+    : frameSlot_(frameSlot), keyWatcher_(keyWatcher), km_(km), isRunning_(false), lastFrameVersion_(0) {
+    if (!cv::ocl::haveOpenCL()) {
+        std::cerr << "OpenCL not available, falling back to CPU" << std::endl;
+    } else {
+        cv::ocl::setUseOpenCL(true);
+        cv::ocl::Device device = cv::ocl::Device::getDefault();
+        std::cout << "Using OpenCL device: " << device.name() << std::endl;
+    }
+}
+
+Colorbot::~Colorbot() {
+    Stop();
+}
+
+void Colorbot::Start() {
+    if (!isRunning_) {
+        if (bgrFrame_.empty() || hsvFrame_.empty() || mask_.empty()) {
+            std::cerr << "Warning: Colorbot not configured. Call SetConfig to enable processing." << std::endl;
+        }
+        isRunning_ = true;
+        handlerThread_ = std::thread(&Colorbot::ProcessLoop, this);
+    }
+}
+
+void Colorbot::Stop() {
+    if (isRunning_) {
+        isRunning_ = false;
+        if (handlerThread_.joinable()) {
+            handlerThread_.join();
+        }
+        // Clear buffers and destroy only the instance-specific window
+        bgrFrame_ = cv::UMat();
+        hsvFrame_ = cv::UMat();
+        mask_ = cv::UMat();
+        cv::destroyWindow("Output Mask");
+    }
+}
+
+void Colorbot::SetConfig(const ::capkfa::RemoteConfig& config) {
+    int width = config.aim().fov();
+    int height = config.aim().fov();
+
+    if (width <= 0 || height <= 0) {
+        throw std::runtime_error("Invalid frame size: " + std::to_string(width) + "x" + std::to_string(height));
+    }
+
+    Stop(); // Stop processing to safely initialize buffers
+
+    // Initialize UMat buffers
+    bgrFrame_ = cv::UMat(height, width, CV_8UC3);
+    hsvFrame_ = cv::UMat(height, width, CV_8UC3);
+    mask_ = cv::UMat(height, width, CV_8UC1);
+
+    std::cout << "Colorbot config set: size " << width << "x" << height << std::endl;
+
+    Start();
+}
+
+void Colorbot::ConvertToBGR(const cv::UMat& frame) {
+    if (!frame.empty() && !bgrFrame_.empty()) {
+        cv::cvtColor(frame, bgrFrame_, cv::COLOR_BGRA2BGR);
+        cv::ocl::finish();
+    } else {
+        std::cerr << "Input frame or bgrFrame_ is empty" << std::endl;
+        bgrFrame_ = cv::UMat();
+    }
+}
+
+void Colorbot::ConvertToHSV() {
+    if (!bgrFrame_.empty() && !hsvFrame_.empty()) {
+        cv::cvtColor(bgrFrame_, hsvFrame_, cv::COLOR_BGR2HSV);
+        cv::ocl::finish();
+    } else {
+        std::cerr << "bgrFrame_ or hsvFrame_ is empty" << std::endl;
+        hsvFrame_ = cv::UMat();
+    }
+}
+
+void Colorbot::FilterInRange() {
+    if (!hsvFrame_.empty() && !mask_.empty()) {
+        cv::Scalar lowerb2(140, 60, 240);
+        cv::Scalar upperb2(160, 255, 255);
+        cv::inRange(hsvFrame_, lowerb2, upperb2, mask_);
+        cv::ocl::finish();
+    } else {
+        std::cerr << "hsvFrame_ or mask_ is empty" << std::endl;
+        mask_ = cv::UMat();
+    }
+}
+
+void Colorbot::DisplayFrame(const cv::UMat& frame, const std::string& windowName) {
+    if (!frame.empty()) {
+        cv::Mat mat;
+        frame.copyTo(mat);
+        if (!mat.empty()) {
+            cv::imshow(windowName, mat);
+            cv::waitKey(1);
+        } else {
+            std::cerr << "Failed to convert " << windowName << " to Mat" << std::endl;
+        }
+    } else {
+        std::cerr << windowName << " is empty" << std::endl;
+    }
+}
+
+void Colorbot::ProcessLoop() {
+    int frameCount = 0;
+    auto lastTime = std::chrono::steady_clock::now();
+
+    while (isRunning_) {
+        if (bgrFrame_.empty() || hsvFrame_.empty() || mask_.empty()) {
+            continue; // Skip if buffers not initialized
+        }
+
+        auto currentTime = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
+
+        if (duration >= 1000) {
+            float fps = (float)frameCount * 1000.0f / duration;
+            std::cout << "Handler FPS: " << fps << std::endl;
+            frameCount = 0;
+            lastTime = currentTime;
+        }
+
+        auto [frame, newVersion] = frameSlot_->GetFrame(lastFrameVersion_);
+        if (!frame.empty()) {
+            if (!keyWatcher_->IsHandlerKeyDown()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+
+            frameCount++;
+            lastFrameVersion_ = newVersion;
+            DisplayFrame(frame, "Output Mask");
+            ConvertToBGR(frame);
+            ConvertToHSV();
+            FilterInRange();
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        if (GetAsyncKeyState('Q')) {
+            isRunning_ = false;
+        }
+    }
+}

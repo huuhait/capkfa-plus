@@ -10,18 +10,21 @@
 #include <memory>
 #include "DeviceManager.h"
 #include "FrameSlot.h"
+#include "../Movement/KeyWatcher.h"
 
 using Microsoft::WRL::ComPtr;
 
 class FrameCapturer {
 public:
-    FrameCapturer(const DeviceManager& deviceManager, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot);
+    FrameCapturer(const DeviceManager& deviceManager, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot, std::shared_ptr<KeyWatcher> keyWatcher);
     ~FrameCapturer();
     void StartCapture();
     void StopCapture();
+    void SetConfig(const ::capkfa::RemoteConfig& config);
 
 private:
     void CaptureLoop();
+    void CreateStagingTexture();
 
     ComPtr<IDXGIOutput1> output1_;
     ComPtr<ID3D11Device> device_;
@@ -31,7 +34,12 @@ private:
     UINT outputIndex_;
     int refreshRate_;
     UINT timeoutMs_;
+    int captureWidth_;
+    int captureHeight_;
+    int offsetX_;
+    int offsetY_;
     std::shared_ptr<FrameSlot> frameSlot_;
+    std::shared_ptr<KeyWatcher> keyWatcher_;
     std::thread captureThread_;
     std::atomic<bool> isCapturing_;
 };
