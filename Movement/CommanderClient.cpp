@@ -21,115 +21,147 @@ CommanderClient::~CommanderClient() {
 
 void CommanderClient::Start() {
     if (!_is_configured) {
-        Log("ERROR", "Server URI not configured. Call SetConfig first.");
+        Log("ERROR", "Server URI not configured.");
         return;
     }
-    Log("DEBUG", "Starting CommanderClient...");
+
     _io_context.restart();
-    boost::system::error_code ec;
-    auto local_endpoint = _socket.local_endpoint(ec);
-    if (!ec) {
-        Log("DEBUG", "Socket bound to local port: " + std::to_string(local_endpoint.port()));
-    } else {
-        Log("ERROR", "Failed to get local endpoint: " + ec.message());
-    }
-    StartReceive();
-    _thread = std::thread([this]() {
-        Log("DEBUG", "CommanderClient thread running io_context");
-        _io_context.run();
-    });
+    _io_thread = std::thread([this]() { _io_context.run(); });
+    StartReceiveLoop();
 }
 
 void CommanderClient::Stop() {
-    Log("DEBUG", "Stopping CommanderClient...");
+    _running = false;
+
     boost::system::error_code ec;
     _socket.cancel(ec);
-    if (ec) Log("WARN", "Socket cancel failed: " + ec.message());
-    _io_context.stop();
-    if (_thread.joinable()) _thread.join();
     _socket.close(ec);
-    if (ec) Log("WARN", "Socket close failed: " + ec.message());
-    _is_configured = false;
-    _server_endpoint = boost::asio::ip::udp::endpoint();
-    _remote_endpoint = boost::asio::ip::udp::endpoint();
-    _last_version.clear();
-    _recv_buffer.fill(0);
-    _button_states.clear();
-    Log("DEBUG", "CommanderClient stopped and reset.");
+
+    if (_recv_thread.joinable()) _recv_thread.join();
+    if (_io_thread.joinable()) _io_thread.join();
+}
+
+void CommanderClient::StartReceiveLoop() {
+    _running = true;
+    _recv_thread = std::thread([this]() {
+        while (_running && _socket.is_open()) {
+            boost::system::error_code ec;
+            size_t len = _socket.receive_from(boost::asio::buffer(_recv_buffer), _remote_endpoint, 0, ec);
+            if (ec) {
+                if (!_running) break;
+                Log("WARN", "Receive error: " + ec.message());
+                continue;
+            }
+
+            if (len < 1) continue;
+
+            uint8_t method = _recv_buffer[0];
+            std::vector<uint8_t> data(_recv_buffer.begin(), _recv_buffer.begin() + len);
+
+            if (method == 8) {
+                HandleButtonStateStream(data);
+            } else {
+                std::lock_guard<std::mutex> lock(_pending_mutex);
+                auto it = _pending_requests.find(method);
+                if (it != _pending_requests.end()) {
+                    it->second.set_value(std::move(data));
+                    _pending_requests.erase(it);
+                } else {
+                    Log("DEBUG", "Ignored packet: method=" + std::to_string(method));
+                }
+            }
+        }
+    });
+}
+
+std::vector<uint8_t> CommanderClient::SendRequest(uint8_t method, const std::vector<uint8_t>& payload, int timeout_ms) {
+    std::vector<uint8_t> buf(5 + payload.size());
+    buf[0] = method;
+    uint32_t len = htonl(payload.size());
+    std::memcpy(buf.data() + 1, &len, 4);
+    std::memcpy(buf.data() + 5, payload.data(), payload.size());
+
+    std::promise<std::vector<uint8_t>> promise;
+    auto future = promise.get_future();
+
+    {
+        std::lock_guard<std::mutex> lock(_pending_mutex);
+        _pending_requests[method] = std::move(promise);
+    }
+
+    boost::system::error_code ec;
+    _socket.send_to(boost::asio::buffer(buf), _server_endpoint, 0, ec);
+    if (ec) {
+        Log("ERROR", "Send error: " + ec.message());
+        throw std::runtime_error("send failed");
+    }
+
+    if (future.wait_for(std::chrono::milliseconds(timeout_ms)) == std::future_status::timeout) {
+        std::lock_guard<std::mutex> lock(_pending_mutex);
+        _pending_requests.erase(method);
+        Log("WARN", "Timeout waiting for method " + std::to_string(method));
+        throw std::runtime_error("timeout");
+    }
+
+    return future.get();
 }
 
 void CommanderClient::Move(int16_t x, int16_t y) {
-    if (!_is_configured) {
-        Log("ERROR", "Server URI not configured.");
-        return;
+    std::vector<uint8_t> payload = {
+        static_cast<uint8_t>(x >> 8), static_cast<uint8_t>(x),
+        static_cast<uint8_t>(y >> 8), static_cast<uint8_t>(y)
+    };
+    auto resp = SendRequest(1, payload, 15);
+    if (resp.size() != 2 || resp[0] != 1 || resp[1] != 0xFF) {
+        Log("WARN", "Invalid Move ACK");
     }
-    std::vector<uint8_t> data(5 + 4);
-    data[0] = 1; // Method ID for Move
-    uint32_t len = htonl(4); // Payload length
-    std::memcpy(data.data() + 1, &len, 4);
-    data[5] = static_cast<uint8_t>(x >> 8); data[6] = static_cast<uint8_t>(x);
-    data[7] = static_cast<uint8_t>(y >> 8); data[8] = static_cast<uint8_t>(y);
-    Send(data, 1, _move_timeout_ms);
 }
 
 void CommanderClient::Click() {
-    if (!_is_configured) {
-        Log("ERROR", "Server URI not configured.");
-        return;
+    auto resp = SendRequest(2, {}, 220);
+    if (resp.size() != 2 || resp[0] != 2 || resp[1] != 0xFF) {
+        Log("WARN", "Invalid Click ACK");
     }
-    std::vector<uint8_t> data(5);
-    data[0] = 2; // Method ID for Click
-    uint32_t len = htonl(0); // Payload length
-    std::memcpy(data.data() + 1, &len, 4);
-    Send(data, 2, _click_timeout_ms);
 }
 
 std::string CommanderClient::Version() {
-    if (!_is_configured) {
-        Log("ERROR", "Server URI not configured.");
+    auto resp = SendRequest(3, {}, 300);
+    if (resp.size() < 5 || resp[0] != 3) {
+        Log("ERROR", "Invalid Version response");
         return "";
     }
-    std::vector<uint8_t> data(5);
-    data[0] = 3; // Method ID for Version
-    uint32_t len = htonl(0); // Payload length
-    std::memcpy(data.data() + 1, &len, 4);
-    Send(data, 3, _version_timeout_ms);
+    uint32_t len;
+    std::memcpy(&len, &resp[1], 4);
+    len = ntohl(len);
+    if (resp.size() < 5 + len) return "";
+    _last_version.assign(reinterpret_cast<const char*>(&resp[5]), len);
     return _last_version;
 }
 
 void CommanderClient::SubscribeButtonStates() {
-    if (!_is_configured) {
-        Log("ERROR", "Server URI not configured.");
-        return;
-    }
-    std::vector<uint8_t> data(5);
-    data[0] = 8; // Method ID for GetButtonStates
-    uint32_t len = htonl(0); // Payload length
-    std::memcpy(data.data() + 1, &len, 4);
-    Send(data, 8, 0); // No timeout for subscription
-}
-
-void CommanderClient::SetButtonStateCallback(std::function<void(uint8_t, bool)> callback) {
-    _button_state_callback = callback;
+    std::vector<uint8_t> data(5, 0);
+    data[0] = 8; // Stream method
+    boost::system::error_code ec;
+    _socket.send_to(boost::asio::buffer(data), _server_endpoint, 0, ec);
+    if (ec) Log("ERROR", "Failed to subscribe to button states: " + ec.message());
 }
 
 void CommanderClient::SetConfig(const ::capkfa::RemoteConfig& config) {
-    Stop(); // Ensure clean state before reconfiguration
-    std::string server_uri = config.mouse_server().uri();
+    Stop();
+
     std::string ip;
     unsigned short port;
-    if (!ParseServerUri(server_uri, ip, port)) {
-        Log("ERROR", "Invalid server URI format: " + server_uri);
+    if (!ParseServerUri(config.mouse_server().uri(), ip, port)) {
+        Log("ERROR", "Invalid server URI: " + config.mouse_server().uri());
         return;
     }
+
     try {
-        // Reinitialize socket
         _socket = boost::asio::ip::udp::socket(_io_context, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), 0));
         _server_endpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::make_address(ip), port);
         _is_configured = true;
-        Log("DEBUG", "Server configured: " + ip + ":" + std::to_string(port));
         Start();
-        SubscribeButtonStates(); // Auto-subscribe to button states
+        SubscribeButtonStates();
     } catch (const std::exception& e) {
         Log("ERROR", "Failed to configure server: " + std::string(e.what()));
         _is_configured = false;
@@ -137,156 +169,42 @@ void CommanderClient::SetConfig(const ::capkfa::RemoteConfig& config) {
 }
 
 bool CommanderClient::ParseServerUri(const std::string& server_uri, std::string& ip, unsigned short& port) {
-    size_t colon_pos = server_uri.find(':');
-    if (colon_pos == std::string::npos) return false;
-
-    ip = server_uri.substr(0, colon_pos);
-    std::string port_str = server_uri.substr(colon_pos + 1);
-
+    size_t colon = server_uri.find(':');
+    if (colon == std::string::npos) return false;
+    ip = server_uri.substr(0, colon);
     try {
-        port = static_cast<unsigned short>(std::stoi(port_str));
+        port = static_cast<unsigned short>(std::stoi(server_uri.substr(colon + 1)));
         return true;
-    } catch (const std::exception&) {
+    } catch (...) {
         return false;
     }
 }
 
-void CommanderClient::Send(const std::vector<uint8_t>& data, uint8_t method_id, int timeout_ms) {
-    std::unique_lock<std::mutex> lock(_mutex);
-    _operation_complete = false;
-    _operation_success = false;
-    _current_method = method_id;
+void CommanderClient::HandleButtonStateStream(const std::vector<uint8_t>& data) {
+    if (data.size() < 5) return;
+    uint32_t len;
+    std::memcpy(&len, &data[1], 4);
+    len = ntohl(len);
+    if (len % 2 != 0 || data.size() < 5 + len) return;
 
-    _socket.async_send_to(
-        boost::asio::buffer(data), _server_endpoint,
-        [this, method_id](const boost::system::error_code& ec, std::size_t) {
-            std::lock_guard<std::mutex> lock(_mutex);
-            if (ec) {
-                Log("ERROR", "Send failed for method " + std::to_string(method_id) + ": " + ec.message());
-                _operation_complete = true;
-                _cv.notify_one();
+    for (size_t i = 5; i + 1 < 5 + len; i += 2) {
+        uint8_t id = data[i];
+        bool pressed = data[i + 1];
+        if (_button_states[id] != pressed) {
+            _button_states[id] = pressed;
+            if (_button_state_callback) {
+                _button_state_callback(id, pressed);
             }
-            // Wait for server response in HandleReceive
-        });
-
-    if (timeout_ms > 0) {
-        if (!_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return _operation_complete; })) {
-            Log("WARN", "Timeout waiting for response to method " + std::to_string(method_id) + " after " + std::to_string(timeout_ms) + "ms");
-            _operation_complete = true;
         }
-    } else {
-        _cv.wait(lock, [this] { return _operation_complete; });
     }
-
-    if (!_operation_success && method_id != 8) {
-        Log("ERROR", "Operation failed for method " + std::to_string(method_id));
-    }
-}
-
-void CommanderClient::StartReceive() {
-    _socket.async_receive_from(
-        boost::asio::buffer(_recv_buffer), _remote_endpoint,
-        [this](const boost::system::error_code& ec, std::size_t bytes_recvd) {
-            HandleReceive(ec, bytes_recvd);
-        });
-}
-
-void CommanderClient::HandleReceive(const boost::system::error_code& ec, std::size_t bytes_recvd) {
-    if (ec) {
-        // Ignore if socket was closed intentionally
-        if (ec == boost::asio::error::operation_aborted || !_socket.is_open()) {
-            Log("DEBUG", "Receive operation aborted or socket closed: " + ec.message());
-        } else {
-            Log("ERROR", "Receive error: " + ec.message());
-            std::lock_guard<std::mutex> lock(_mutex);
-            _operation_complete = true;
-            _cv.notify_one();
-        }
-        if (_socket.is_open()) StartReceive();
-        return;
-    }
-
-    // Check only server IP, allow any port
-    if (_remote_endpoint.address() != _server_endpoint.address()) {
-        if (_socket.is_open()) StartReceive();
-        return;
-    }
-
-    if (bytes_recvd < 5) {
-        if (_socket.is_open()) StartReceive();
-        return;
-    }
-
-    uint8_t method = _recv_buffer[0];
-    uint32_t payload_len;
-    std::memcpy(&payload_len, _recv_buffer.data() + 1, 4);
-    payload_len = ntohl(payload_len);
-
-    // Log("DEBUG", "Received method=" + std::to_string(method) + ", payload_len=" + std::to_string(payload_len));
-
-    std::unique_lock<std::mutex> lock(_mutex);
-    if (method == _current_method || method == 8) {
-        switch (method) {
-            case 1: // Move response
-                if (bytes_recvd == 2 && _recv_buffer[1] == 0xFF) {
-                    Log("DEBUG", "Move acknowledged");
-                    _operation_success = true;
-                } else {
-                    Log("WARN", "Invalid Move response");
-                }
-                _operation_complete = true;
-                _cv.notify_one();
-                break;
-            case 2: // Click response
-                if (bytes_recvd == 2 && _recv_buffer[1] == 0xFF) {
-                    Log("DEBUG", "Click acknowledged");
-                    _operation_success = true;
-                } else {
-                    Log("WARN", "Invalid Click response");
-                }
-                _operation_complete = true;
-                _cv.notify_one();
-                break;
-            case 3: // Version response
-                if (payload_len > 0 && bytes_recvd >= 5 + payload_len) {
-                    _last_version.assign(reinterpret_cast<const char*>(_recv_buffer.data() + 5), payload_len);
-                    Log("DEBUG", "Version: " + _last_version);
-                    _operation_success = true;
-                } else {
-                    Log("WARN", "Invalid Version response");
-                }
-                _operation_complete = true;
-                _cv.notify_one();
-                break;
-            case 8: // Button states
-                if (payload_len % 2 == 0 && bytes_recvd >= 5 + payload_len) {
-                    for (size_t i = 5; i < 5 + payload_len; i += 2) {
-                        uint8_t id = _recv_buffer[i];
-                        bool pressed = _recv_buffer[i + 1];
-                        if (_button_states[id] != pressed) {
-                            _button_states[id] = pressed;
-                            if (_button_state_callback) {
-                                _button_state_callback(id, pressed);
-                            }
-                        }
-                    }
-                } else {
-                    Log("WARN", "Invalid Button states payload");
-                }
-                break;
-            default:
-                Log("WARN", "Unknown method: " + std::to_string(method));
-                _operation_complete = true;
-                _cv.notify_one();
-        }
-    } else {
-        Log("WARN", "Received unexpected method: " + std::to_string(method) + ", expected: " + std::to_string(_current_method));
-    }
-    if (_socket.is_open()) StartReceive();
 }
 
 std::map<uint8_t, bool> CommanderClient::ButtonStates() {
     return _button_states;
+}
+
+void CommanderClient::SetButtonStateCallback(std::function<void(uint8_t, bool)> callback) {
+    _button_state_callback = callback;
 }
 
 void CommanderClient::Log(const std::string& level, const std::string& message) {
@@ -294,7 +212,7 @@ void CommanderClient::Log(const std::string& level, const std::string& message) 
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
     auto time = std::chrono::system_clock::to_time_t(now);
     std::stringstream ss;
-    ss << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S") << '.' << std::setfill('0') << std::setw(3) << ms.count()
+    ss << std::put_time(std::localtime(&time), "%F %T") << '.' << std::setw(3) << std::setfill('0') << ms.count()
        << " [" << level << "] " << message;
     std::cout << ss.str() << std::endl;
 }

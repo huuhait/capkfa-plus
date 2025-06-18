@@ -54,6 +54,7 @@ void Colorbot::SetConfig(const ::capkfa::RemoteConfig& config) {
     Stop(); // Stop processing to safely initialize buffers
 
     // Initialize UMat buffers
+    remoteConfig_ = config;
     bgrFrame_ = cv::UMat(height, width, CV_8UC3);
     hsvFrame_ = cv::UMat(height, width, CV_8UC3);
     mask_ = cv::UMat(height, width, CV_8UC1);
@@ -138,16 +139,54 @@ void Colorbot::ProcessLoop() {
 
             frameCount++;
             lastFrameVersion_ = newVersion;
-            DisplayFrame(frame, "Output Mask");
+            // DisplayFrame(frame, "Output Mask");
             ConvertToBGR(frame);
             ConvertToHSV();
             FilterInRange();
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+            std::optional<cv::Point> point = GetHighestMaskPoint();
+            if (!point.has_value()) {
+                continue;
+            }
+
+            capkfa::RemoteConfigAimType aimType = keyWatcher_->IsFlickKeyDown() ? remoteConfig_.aim().flick() : remoteConfig_.aim().aim();
+            auto [moveX, moveY] = CalculateCoordinates(point.value(), aimType);
+
+            if (moveX != 0 || moveY != 0) {
+                km_->Move(moveX, moveY);
+            }
         }
 
         if (GetAsyncKeyState('Q')) {
             isRunning_ = false;
         }
     }
+}
+
+std::optional<cv::Point> Colorbot::GetHighestMaskPoint() {
+    std::vector<cv::Point> points;
+    cv::findNonZero(mask_, points);
+    if (points.empty()) return std::nullopt;
+
+    cv::Point min = points[0];
+    for (size_t i = 1; i < points.size(); ++i)
+        if (points[i].y < min.y) min = points[i];
+
+    return min;
+}
+
+std::tuple<short, short> Colorbot::CalculateCoordinates(cv::Point p, capkfa::RemoteConfigAimType aimType)
+{
+    double m = remoteConfig_.aim().fov() / 2.0;
+    double dx = p.x - m, dy = p.y - m;
+    double distance = std::sqrt(dx * dx + dy * dy);
+    double maxDistance = m * std::sqrt(2.0);
+
+    double smoothX = aimType.smooth_x().min() + (aimType.smooth_x().max() - aimType.smooth_x().min()) * (1.0 - distance / maxDistance);
+    double smoothY = aimType.smooth_y().min() + (aimType.smooth_y().max() - aimType.smooth_y().min()) * (1.0 - distance / maxDistance);
+
+    short adjustedX = static_cast<short>(std::round((p.x - m + remoteConfig_.aim().offset_x()) / smoothX));
+    short adjustedY = static_cast<short>(std::round((p.y - m + remoteConfig_.aim().offset_y()) / smoothY));
+
+    return {adjustedX, adjustedY};
 }
