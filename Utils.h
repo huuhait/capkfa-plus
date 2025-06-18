@@ -3,6 +3,7 @@
 
 #include <comdef.h>
 #include <string>
+#include <stdexcept> // Added
 
 inline void CheckHRESULT(HRESULT hr, const std::string& context) {
     if (FAILED(hr)) {

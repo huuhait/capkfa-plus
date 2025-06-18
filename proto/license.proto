@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package capkfa;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/huuhait/cheetah/pkg/pb/capkfa;pb";
+
+message CreateSessionRequest {
+  string key = 1;
+  string hwid = 2;
+  string version = 3;
+}
+
+message CreateSessionResponse {
+  string session_id = 1;
+  bool valid = 2;
+  int64 expired_at = 3; // Duration in seconds
+}
+
+message GetSessionRequest {
+  string key = 1;
+}
+
+message GetSessionResponse {
+  string key = 1;
+  string session_id = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp last_ping = 4;
+}
+
+message KillAllSessionsRequest {
+  string key = 1;
+}
+
+message KillAllSessionsResponse {
+  repeated string killed_session_ids = 1;
+}
+
+message PingRequest {
+  string key = 1;
+  string hwid = 2;
+  string version = 3;
+  string session_id = 4;
+}
+
+message PingResponse {
+  string session_id = 1;
+  bool valid = 2;
+}
+
+message GetStatusResponse {
+  bool online = 1;
+  string version = 2;
+}
+
+// Profile enum
+enum Profile {
+  Unknown = 0;
+  Purple = 1;
+  Yellow = 2;
+  Red = 3;
+  PurpleV2 = 4;
+}
+
+message RemoteConfigMouseServer {
+  string uri = 1;
+}
+
+message RemoteConfigAim {
+  int32 fov = 1;
+  int32 offset_x = 2;
+  int32 offset_y = 3;
+  bool recoil = 4;
+  RemoteConfigAimType aim = 5;
+  RemoteConfigAimType flick = 6;
+}
+
+message RemoteConfigAimSmooth {
+  float min = 1;
+  float max = 2;
+}
+
+message RemoteConfigAimType {
+  string key = 1;
+  bool lock = 2;
+  int32 input_delay = 3;
+  RemoteConfigAimSmooth smooth_x = 4;
+  RemoteConfigAimSmooth smooth_y = 5;
+}
+
+// RemoteConfig message
+message RemoteConfig {
+  RemoteConfigMouseServer mouse_server = 1;
+  RemoteConfigAim aim = 2;
+  Profile color_profile = 3;
+}
+
+message GetConfigRequest {
+  string key = 1;
+}
+
+message GetConfigResponse {
+  RemoteConfig remote_config = 1;
+}
+
+service License {
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc GetLatestSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc KillAllSessions(KillAllSessionsRequest) returns (KillAllSessionsResponse);
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc GetStatus(google.protobuf.Empty) returns (GetStatusResponse);
+  rpc GetRemoteConfig(GetConfigRequest) returns (GetConfigResponse);
+  rpc StreamConfig(GetConfigRequest) returns (stream GetConfigResponse);
+}

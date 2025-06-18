@@ -4,7 +4,6 @@
 #include <memory>
 #include <thread>
 #include <atomic>
-#include <chrono>
 #include <windows.h>
 #include <cstdint>
 #include <opencv2/opencv.hpp>

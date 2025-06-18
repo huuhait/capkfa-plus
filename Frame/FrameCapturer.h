@@ -5,18 +5,17 @@
 #include <d3d11.h>
 #include <opencv2/opencv.hpp>
 #include <wrl/client.h>
-#include <string>
 #include <thread>
 #include <atomic>
 #include <memory>
+#include "DeviceManager.h"
+#include "FrameSlot.h"
 
 using Microsoft::WRL::ComPtr;
 
-class FrameSlot;
-
 class FrameCapturer {
 public:
-    FrameCapturer(ComPtr<IDXGIOutput1> output1, ComPtr<ID3D11Device> device, ComPtr<ID3D11DeviceContext> context, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot);
+    FrameCapturer(const DeviceManager& deviceManager, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot);
     ~FrameCapturer();
     void StartCapture();
     void StopCapture();
@@ -28,7 +27,7 @@ private:
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
     ComPtr<ID3D11Texture2D> stagingTexture_;
-    cv::UMat frame_; // Reverted to UMat
+    cv::UMat frame_;
     UINT outputIndex_;
     int refreshRate_;
     UINT timeoutMs_;

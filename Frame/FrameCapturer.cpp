@@ -1,12 +1,12 @@
 #include "FrameCapturer.h"
-#include "FrameSlot.h"
-#include "Utils.h"
 #include <opencv2/core/ocl.hpp>
 #include <iostream>
 #include <vector>
 #include <chrono>
 #include <windows.h>
-#include <fstream>
+#include "FrameSlot.h"
+#include "DeviceManager.h"
+#include "../Utils.h"
 
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3d11.lib")
@@ -30,8 +30,10 @@ int GetMonitorRefreshRate(ComPtr<IDXGIOutput> output) {
     return maxRefreshRate;
 }
 
-FrameCapturer::FrameCapturer(ComPtr<IDXGIOutput1> output1, ComPtr<ID3D11Device> device, ComPtr<ID3D11DeviceContext> context, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot)
-    : output1_(output1), device_(device), context_(context), outputIndex_(outputIndex), frameSlot_(frameSlot), isCapturing_(false) {
+FrameCapturer::FrameCapturer(const DeviceManager& deviceManager, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot)
+    : output1_(deviceManager.GetOutput()), device_(deviceManager.GetDevice()), context_(deviceManager.GetContext()),
+      outputIndex_(outputIndex), frameSlot_(frameSlot), isCapturing_(false) {
+    // Rest of the constructor remains unchanged
     DXGI_OUTPUT_DESC outputDesc;
     CheckHRESULT(output1_->GetDesc(&outputDesc), "GetDesc");
     int width = outputDesc.DesktopCoordinates.right - outputDesc.DesktopCoordinates.left;
@@ -61,7 +63,7 @@ FrameCapturer::FrameCapturer(ComPtr<IDXGIOutput1> output1, ComPtr<ID3D11Device> 
     stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     CheckHRESULT(device_->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture_), "CreateTexture2D");
 
-    frame_ = cv::UMat(500, 500, CV_8UC4); // Reverted to UMat
+    frame_ = cv::UMat(500, 500, CV_8UC4);
 }
 
 FrameCapturer::~FrameCapturer() {
@@ -194,29 +196,6 @@ void FrameCapturer::CaptureLoop() {
             std::cerr << "Captured frame is empty" << std::endl;
             duplication->ReleaseFrame();
             continue;
-        }
-
-        static bool saved = false;
-        if (!saved) {
-            cv::Mat mat;
-            frame_.copyTo(mat);
-            if (!mat.empty()) {
-                cv::imwrite("debug_capture.png", mat);
-                saved = true;
-                std::cout << "Saved debug_capture.png" << std::endl;
-            }
-        }
-        static bool savedRaw = false;
-        if (!savedRaw) {
-            cv::Mat mat;
-            frame_.copyTo(mat);
-            if (!mat.empty()) {
-                std::ofstream out("debug_raw_pixels.bin", std::ios::binary);
-                out.write(reinterpret_cast<char*>(mat.data), 500 * 500 * 4);
-                out.close();
-                savedRaw = true;
-                std::cout << "Saved debug_raw_pixels.bin" << std::endl;
-            }
         }
 
         frameSlot_->StoreFrame(frame_);

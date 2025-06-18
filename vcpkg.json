@@ -7,6 +7,9 @@
       "features": ["opencl"]
     },
     "boost",
-    "bext-di"
+    "bext-di",
+    "protobuf",
+    "grpc",
+    "llvm"
   ]
 }
