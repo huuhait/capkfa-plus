@@ -92,15 +92,17 @@ std::vector<uint8_t> CommanderClient::SendRequest(uint8_t method, const std::vec
     boost::system::error_code ec;
     _socket.send_to(boost::asio::buffer(buf), _server_endpoint, 0, ec);
     if (ec) {
+        std::lock_guard<std::mutex> lock(_pending_mutex);
+        _pending_requests.erase(method);
         Log("ERROR", "Send error: " + ec.message());
-        throw std::runtime_error("send failed");
+        return {};
     }
 
     if (future.wait_for(std::chrono::milliseconds(timeout_ms)) == std::future_status::timeout) {
         std::lock_guard<std::mutex> lock(_pending_mutex);
         _pending_requests.erase(method);
         Log("WARN", "Timeout waiting for method " + std::to_string(method));
-        throw std::runtime_error("timeout");
+        return {};
     }
 
     return future.get();
@@ -111,7 +113,7 @@ void CommanderClient::Move(int16_t x, int16_t y) {
         static_cast<uint8_t>(x >> 8), static_cast<uint8_t>(x),
         static_cast<uint8_t>(y >> 8), static_cast<uint8_t>(y)
     };
-    auto resp = SendRequest(1, payload, 15);
+    auto resp = SendRequest(1, payload, 1000);
     if (resp.size() != 2 || resp[0] != 1 || resp[1] != 0xFF) {
         Log("WARN", "Invalid Move ACK");
     }
@@ -192,6 +194,7 @@ void CommanderClient::HandleButtonStateStream(const std::vector<uint8_t>& data) 
         bool pressed = data[i + 1];
         if (_button_states[id] != pressed) {
             _button_states[id] = pressed;
+            Log("DEBUG", "Button " + std::to_string(id) + " state changed to " + (pressed ? "pressed" : "released"));
             if (_button_state_callback) {
                 _button_state_callback(id, pressed);
             }

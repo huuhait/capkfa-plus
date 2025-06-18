@@ -39,7 +39,7 @@ void Colorbot::Stop() {
         bgrFrame_ = cv::UMat();
         hsvFrame_ = cv::UMat();
         mask_ = cv::UMat();
-        cv::destroyWindow("Output Mask");
+        cv::destroyAllWindows();
     }
 }
 
