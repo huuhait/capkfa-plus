@@ -26,6 +26,7 @@ private:
     void ConvertToHSV();
     void FilterInRange();
     void DisplayFrame(const cv::UMat& frame, const std::string& windowName);
+    void HandleFlick(short moveX, short moveY);
     std::optional<cv::Point> GetHighestMaskPoint();
     std::tuple<short, short> CalculateCoordinates(cv::Point p, capkfa::RemoteConfigAimType aimType);
 

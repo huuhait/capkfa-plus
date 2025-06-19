@@ -152,6 +152,8 @@ void Colorbot::ProcessLoop() {
             capkfa::RemoteConfigAimType aimType = keyWatcher_->IsFlickKeyDown() ? remoteConfig_.aim().flick() : remoteConfig_.aim().aim();
             auto [moveX, moveY] = CalculateCoordinates(point.value(), aimType);
 
+            HandleFlick(moveX, moveY);
+
             if (moveX != 0 || moveY != 0) {
                 km_->Move(moveX, moveY);
             }
@@ -189,4 +191,19 @@ std::tuple<short, short> Colorbot::CalculateCoordinates(cv::Point p, capkfa::Rem
     short adjustedY = static_cast<short>(std::round((p.y - m + remoteConfig_.aim().offset_y()) / smoothY));
 
     return {adjustedX, adjustedY};
+}
+
+void Colorbot::HandleFlick(short moveX, short moveY) {
+    if (!keyWatcher_->IsFlickKeyDown()) return;
+
+    static auto lastClick = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastClick).count();
+
+    bool isIdealToFlick = std::abs(moveX) <= 1 && std::abs(moveY) <= 1;
+
+    if (isIdealToFlick && elapsed > 300) {
+        km_->Click();
+        lastClick = now;
+    }
 }

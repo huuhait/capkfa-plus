@@ -102,11 +102,17 @@ void App::ProcessConfigStreaming() {
     LicenseClient::StreamConfigReader reader = licenseClient_->StreamConfig(request);
     ::capkfa::GetConfigResponse response;
 
+    bool started = false;
+
     while (reader.Read(response) && isStreamingConfig_) {
         capturer_->SetConfig(response.remote_config());
         logicManager_->SetConfig(response.remote_config());
         keyWatcher_->SetConfig(response.remote_config());
-        commanderClient_->SetConfig(response.remote_config());
+        if (!started) {
+            // this used to prevent reconnect of the commander
+            commanderClient_->SetConfig(response.remote_config());
+            started = true;
+        }
     }
 
     reader.Finish();

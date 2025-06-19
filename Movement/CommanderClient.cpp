@@ -28,6 +28,7 @@ void CommanderClient::Start() {
     _io_context.restart();
     _io_thread = std::thread([this]() { _io_context.run(); });
     StartReceiveLoop();
+    StartPingLoop();
 }
 
 void CommanderClient::Stop() {
@@ -38,6 +39,7 @@ void CommanderClient::Stop() {
     _socket.close(ec);
 
     if (_recv_thread.joinable()) _recv_thread.join();
+    if (_ping_thread.joinable()) _ping_thread.join();
     if (_io_thread.joinable()) _io_thread.join();
 }
 
@@ -60,6 +62,10 @@ void CommanderClient::StartReceiveLoop() {
 
             if (method == 8) {
                 HandleButtonStateStream(data);
+            } else if (method == 9) {
+                HandlePing();
+            } else if (method == 10) {
+                HandlePong();
             } else {
                 std::lock_guard<std::mutex> lock(_pending_mutex);
                 auto it = _pending_requests.find(method);
@@ -72,6 +78,54 @@ void CommanderClient::StartReceiveLoop() {
             }
         }
     });
+}
+
+void CommanderClient::StartPingLoop() {
+    _running = true;
+    _ping_thread = std::thread([this]() {
+        while (_running && _socket.is_open()) {
+            std::vector<uint8_t> ping = { 9 }; // Ping method ID
+            {
+                std::lock_guard<std::mutex> lock(_ping_mutex);
+                _last_ping_time = std::chrono::steady_clock::now();
+                _pong_received = false;
+            }
+
+            boost::system::error_code ec;
+            _socket.send_to(boost::asio::buffer(ping), _server_endpoint, 0, ec);
+            if (ec) {
+                Log("ERROR", "Failed to send ping: " + ec.message());
+            } else {
+                Log("DEBUG", "Sent ping to server");
+            }
+
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+        }
+    });
+}
+
+void CommanderClient::HandlePing() {
+    std::vector<uint8_t> pong = { 10 }; // Pong method ID
+    boost::system::error_code ec;
+    _socket.send_to(boost::asio::buffer(pong), _server_endpoint, 0, ec);
+    if (ec) {
+        Log("ERROR", "Failed to send pong: " + ec.message());
+    } else {
+        Log("DEBUG", "Sent pong to server");
+    }
+}
+
+void CommanderClient::HandlePong() {
+    std::lock_guard<std::mutex> lock(_ping_mutex);
+    _pong_received = true;
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - _last_ping_time).count();
+    Log("DEBUG", "Received pong from server, latency=" + std::to_string(duration) + "ms");
+
+    // Check if pong was received within timeout (e.g., 1 second)
+    if (duration > 1000) {
+        Log("WARN", "Pong received too late, latency=" + std::to_string(duration) + "ms");
+    }
 }
 
 std::vector<uint8_t> CommanderClient::SendRequest(uint8_t method, const std::vector<uint8_t>& payload, int timeout_ms) {
