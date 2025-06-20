@@ -117,145 +117,153 @@ void FrameCapturer::StopCapture() {
 }
 
 void FrameCapturer::CaptureLoop() {
-    int frameCount = 0;
-    auto lastTime = std::chrono::steady_clock::now();
-    std::vector<float> frameTimes;
-    ComPtr<IDXGIOutputDuplication> duplication;
+    try {
+        int frameCount = 0;
+        auto lastTime = std::chrono::steady_clock::now();
+        std::vector<float> frameTimes;
+        ComPtr<IDXGIOutputDuplication> duplication;
 
-    while (isCapturing_) {
-        if (frame_.empty()) {
-            continue; // Skip if not configured
-        }
+        while (isCapturing_) {
+            if (frame_.empty()) {
+                continue; // Skip if not configured
+            }
 
-        if (!keyWatcher_->IsCaptureKeyDown()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
-        }
+            if (!keyWatcher_->IsCaptureKeyDown()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
 
-        auto frameStart = std::chrono::steady_clock::now();
+            auto frameStart = std::chrono::steady_clock::now();
 
-        HRESULT hr = duplication ? S_OK : output1_->DuplicateOutput(device_.Get(), &duplication);
-        if (FAILED(hr)) {
-            std::cerr << "Initial DuplicateOutput failed: " << _com_error(hr).ErrorMessage() << std::endl;
-            isCapturing_ = false;
-            return;
-        }
+            HRESULT hr = duplication ? S_OK : output1_->DuplicateOutput(device_.Get(), &duplication);
+            if (FAILED(hr)) {
+                std::cerr << "Initial DuplicateOutput failed: " << _com_error(hr).ErrorMessage() << std::endl;
+                isCapturing_ = false;
+                return;
+            }
 
-        DXGI_OUTDUPL_FRAME_INFO frameInfo;
-        ComPtr<IDXGIResource> desktopResource;
-        hr = duplication->AcquireNextFrame(timeoutMs_, &frameInfo, &desktopResource);
-        if (hr == DXGI_ERROR_ACCESS_LOST) {
-            duplication.Reset();
-            continue;
-        }
-        if (hr == DXGI_ERROR_DEVICE_REMOVED) {
-            std::cerr << "Device removed: " << _com_error(hr).ErrorMessage() << std::endl;
-            isCapturing_ = false;
-            return;
-        }
-        if (hr == DXGI_ERROR_WAIT_TIMEOUT || FAILED(hr)) {
-            continue;
-        }
+            DXGI_OUTDUPL_FRAME_INFO frameInfo;
+            ComPtr<IDXGIResource> desktopResource;
+            hr = duplication->AcquireNextFrame(timeoutMs_, &frameInfo, &desktopResource);
+            if (hr == DXGI_ERROR_ACCESS_LOST) {
+                duplication.Reset();
+                continue;
+            }
+            if (hr == DXGI_ERROR_DEVICE_REMOVED) {
+                std::cerr << "Device removed: " << _com_error(hr).ErrorMessage() << std::endl;
+                isCapturing_ = false;
+                return;
+            }
+            if (hr == DXGI_ERROR_WAIT_TIMEOUT || FAILED(hr)) {
+                continue;
+            }
 
-        ComPtr<ID3D11Texture2D> desktopTexture;
-        CheckHRESULT(desktopResource->QueryInterface(IID_PPV_ARGS(&desktopTexture)), "QueryInterface Texture2D");
+            ComPtr<ID3D11Texture2D> desktopTexture;
+            CheckHRESULT(desktopResource->QueryInterface(IID_PPV_ARGS(&desktopTexture)), "QueryInterface Texture2D");
 
-        D3D11_TEXTURE2D_DESC desc;
-        desktopTexture->GetDesc(&desc);
-        if (desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
-            std::cerr << "Unexpected desktop texture format: " << desc.Format << std::endl;
-            duplication->ReleaseFrame();
-            continue;
-        }
+            D3D11_TEXTURE2D_DESC desc;
+            desktopTexture->GetDesc(&desc);
+            if (desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
+                std::cerr << "Unexpected desktop texture format: " << desc.Format << std::endl;
+                duplication->ReleaseFrame();
+                continue;
+            }
 
-        D3D11_BOX srcBox = {
-            static_cast<UINT>(offsetX_),
-            static_cast<UINT>(offsetY_),
-            0,
-            static_cast<UINT>(offsetX_ + captureWidth_),
-            static_cast<UINT>(offsetY_ + captureHeight_),
-            1
-        };
+            D3D11_BOX srcBox = {
+                static_cast<UINT>(offsetX_),
+                static_cast<UINT>(offsetY_),
+                0,
+                static_cast<UINT>(offsetX_ + captureWidth_),
+                static_cast<UINT>(offsetY_ + captureHeight_),
+                1
+            };
 
-        context_->CopySubresourceRegion(stagingTexture_.Get(), 0, 0, 0, 0, desktopTexture.Get(), 0, &srcBox);
+            context_->CopySubresourceRegion(stagingTexture_.Get(), 0, 0, 0, 0, desktopTexture.Get(), 0, &srcBox);
 
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        CheckHRESULT(context_->Map(stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map");
+            D3D11_MAPPED_SUBRESOURCE mapped;
+            CheckHRESULT(context_->Map(stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map");
 
-        if (mapped.pData == nullptr) {
-            std::cerr << "Mapped data is null" << std::endl;
+            if (mapped.pData == nullptr) {
+                std::cerr << "Mapped data is null" << std::endl;
+                context_->Unmap(stagingTexture_.Get(), 0);
+                duplication->ReleaseFrame();
+                continue;
+            }
+
+            uint8_t* src = (uint8_t*)mapped.pData;
+            cv::Mat temp(captureHeight_, captureWidth_, CV_8UC4);
+            uint8_t* dst = temp.data;
+            bool allZero = true;
+            if (mapped.RowPitch == captureWidth_ * 4) {
+                memcpy(dst, src, captureWidth_ * captureHeight_ * 4);
+                for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
+                    if (dst[i] != 0) {
+                        allZero = false;
+                        break;
+                    }
+                }
+            } else {
+                for (int i = 0; i < captureHeight_; ++i) {
+                    memcpy(dst + i * captureWidth_ * 4, src + i * mapped.RowPitch, captureWidth_ * 4);
+                }
+                for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
+                    if (dst[i] != 0) {
+                        allZero = false;
+                        break;
+                    }
+                }
+            }
             context_->Unmap(stagingTexture_.Get(), 0);
-            duplication->ReleaseFrame();
-            continue;
-        }
 
-        uint8_t* src = (uint8_t*)mapped.pData;
-        cv::Mat temp(captureHeight_, captureWidth_, CV_8UC4);
-        uint8_t* dst = temp.data;
-        bool allZero = true;
-        if (mapped.RowPitch == captureWidth_ * 4) {
-            memcpy(dst, src, captureWidth_ * captureHeight_ * 4);
-            for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
-                if (dst[i] != 0) {
-                    allZero = false;
-                    break;
-                }
+            if (allZero) {
+                std::cerr << "Captured frame data is all zeros" << std::endl;
+                duplication->ReleaseFrame();
+                continue;
             }
-        } else {
-            for (int i = 0; i < captureHeight_; ++i) {
-                memcpy(dst + i * captureWidth_ * 4, src + i * mapped.RowPitch, captureWidth_ * 4);
+
+            temp.copyTo(frame_);
+            cv::ocl::finish();
+
+            if (frame_.empty()) {
+                std::cerr << "Captured frame is empty" << std::endl;
+                duplication->ReleaseFrame();
+                continue;
             }
-            for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
-                if (dst[i] != 0) {
-                    allZero = false;
-                    break;
-                }
+
+            frameSlot_->StoreFrame(frame_);
+
+            auto frameEnd = std::chrono::steady_clock::now();
+            auto frameDuration = std::chrono::duration_cast<std::chrono::microseconds>(frameEnd - frameStart).count();
+            frameTimes.push_back(frameDuration / 1000.0f);
+
+            if (GetAsyncKeyState('Q') & 0x8000) {
+                isCapturing_ = false;
             }
-        }
-        context_->Unmap(stagingTexture_.Get(), 0);
 
-        if (allZero) {
-            std::cerr << "Captured frame data is all zeros" << std::endl;
+            frameCount++;
+            auto currentTime = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
+            if (duration >= 1000) {
+                float fps = (float)frameCount * 1000.0f / duration;
+                float mean = 0.0f;
+                for (float t : frameTimes) mean += t;
+                mean /= frameTimes.size();
+                float variance = 0.0f;
+                for (float t : frameTimes) variance += (t - mean) * (t - mean);
+                variance /= frameTimes.size();
+                std::cout << "Output " << outputIndex_ << " FPS: " << fps << ", Frame Time Variance: " << variance << "ms^2" << std::endl;
+                frameCount = 0;
+                frameTimes.clear();
+                lastTime = currentTime;
+            }
+
             duplication->ReleaseFrame();
-            continue;
         }
-
-        temp.copyTo(frame_);
-        cv::ocl::finish();
-
-        if (frame_.empty()) {
-            std::cerr << "Captured frame is empty" << std::endl;
-            duplication->ReleaseFrame();
-            continue;
-        }
-
-        frameSlot_->StoreFrame(frame_);
-
-        auto frameEnd = std::chrono::steady_clock::now();
-        auto frameDuration = std::chrono::duration_cast<std::chrono::microseconds>(frameEnd - frameStart).count();
-        frameTimes.push_back(frameDuration / 1000.0f);
-
-        if (GetAsyncKeyState('Q') & 0x8000) {
-            isCapturing_ = false;
-        }
-
-        frameCount++;
-        auto currentTime = std::chrono::steady_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
-        if (duration >= 1000) {
-            float fps = (float)frameCount * 1000.0f / duration;
-            float mean = 0.0f;
-            for (float t : frameTimes) mean += t;
-            mean /= frameTimes.size();
-            float variance = 0.0f;
-            for (float t : frameTimes) variance += (t - mean) * (t - mean);
-            variance /= frameTimes.size();
-            std::cout << "Output " << outputIndex_ << " FPS: " << fps << ", Frame Time Variance: " << variance << "ms^2" << std::endl;
-            frameCount = 0;
-            frameTimes.clear();
-            lastTime = currentTime;
-        }
-
-        duplication->ReleaseFrame();
+    } catch (const std::exception& e) {
+        std::cerr << "CaptureLoop crashed: " << e.what() << std::endl;
+        isCapturing_ = false;
+    } catch (...) {
+        std::cerr << "CaptureLoop crashed: Unknown error" << std::endl;
+        isCapturing_ = false;
     }
 }

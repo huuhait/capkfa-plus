@@ -77,6 +77,7 @@ bool App::CheckServerStatus() {
         return licenseClient_->CreateSession(request);
     } catch (const std::exception& e) {
         std::cerr << "Session creation failed: " << e.what() << std::endl;
+        return response;
     }
 }
 

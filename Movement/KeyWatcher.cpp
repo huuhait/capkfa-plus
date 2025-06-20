@@ -49,6 +49,10 @@ bool KeyWatcher::IsFlickKeyDown() {
     return IsKeyDown(key);
 }
 
+bool KeyWatcher::IsShotKeyDown() {
+    return IsKeyDown(0);
+}
+
 bool KeyWatcher::IsCaptureKeyDown() {
     return IsAimKeuDown() || IsFlickKeyDown();
 }

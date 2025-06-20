@@ -58,6 +58,7 @@ void Colorbot::SetConfig(const ::capkfa::RemoteConfig& config) {
     bgrFrame_ = cv::UMat(height, width, CV_8UC3);
     hsvFrame_ = cv::UMat(height, width, CV_8UC3);
     mask_ = cv::UMat(height, width, CV_8UC1);
+    recoil_active_ = false;
 
     std::cout << "Colorbot config set: size " << width << "x" << height << std::endl;
 
@@ -189,6 +190,33 @@ std::tuple<short, short> Colorbot::CalculateCoordinates(cv::Point p, capkfa::Rem
 
     short adjustedX = static_cast<short>(std::round((p.x - m + remoteConfig_.aim().offset_x()) / smoothX));
     short adjustedY = static_cast<short>(std::round((p.y - m + remoteConfig_.aim().offset_y()) / smoothY));
+
+    if (remoteConfig_.aim().recoil()) {
+        // Apply recoil pattern when firing (shot key held)
+        if (keyWatcher_->IsShotKeyDown()) {
+            if (!recoil_active_) {
+                recoil_active_ = true;
+                recoil_start_time_ = std::chrono::steady_clock::now();
+            }
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - recoil_start_time_).count();
+            if (elapsed <= recoil_duration_ms_ && !recoil_pattern_.empty()) {
+                float t = elapsed / static_cast<float>(recoil_duration_ms_);
+                size_t pattern_size = recoil_pattern_.size();
+                float index = t * (pattern_size - 1);
+                size_t idx = static_cast<size_t>(index);
+                float frac = index - idx;
+                float recoil_offset = (idx < pattern_size - 1)
+                    ? recoil_pattern_[idx] + frac * (recoil_pattern_[idx + 1] - recoil_pattern_[idx])
+                    : recoil_pattern_.back();
+                adjustedY += static_cast<short>(recoil_offset);
+            } else {
+                recoil_active_ = false;
+            }
+        } else {
+            recoil_active_ = false;
+        }
+    }
 
     return {adjustedX, adjustedY};
 }

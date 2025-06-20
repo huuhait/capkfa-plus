@@ -14,6 +14,7 @@ public:
     bool IsHandlerKeyDown();
     bool IsAimKeuDown();
     bool IsFlickKeyDown();
+    bool IsShotKeyDown();
 private:
     bool IsKeyDown(uint8_t key);
     uint8_t GetKey(const std::string& key);

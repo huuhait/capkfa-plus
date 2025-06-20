@@ -42,6 +42,11 @@ private:
     cv::UMat bgrFrame_;
     cv::UMat hsvFrame_;
     cv::UMat mask_;
+
+    static constexpr int recoil_duration_ms_ = 90;
+    std::vector<float> recoil_pattern_ = {2.0f, 2.7f, 3.2f, 3.7f, 4.5f}; // Downward pixel adjustments
+    bool recoil_active_;
+    std::chrono::steady_clock::time_point recoil_start_time_;
 };
 
 #endif
