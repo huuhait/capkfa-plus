@@ -3,10 +3,9 @@
 
 #include "License/LicenseClient.h"
 #include "Frame/FrameCapturer.h"
-#include "Frame/FrameSlot.h"
 #include "Logic/LogicManager.h"
-#include "Frame/DeviceManager.h"
 #include "Movement/CommanderClient.h"
+#include "obf_fake_logic.inl"
 #include <memory>
 #include <string>
 
@@ -19,7 +18,7 @@ public:
         std::shared_ptr<LogicManager> logicManager);
     ~App() = default;
 
-    bool Start(const std::string& userId);
+    bool Start();
     void Stop();
 
 private:

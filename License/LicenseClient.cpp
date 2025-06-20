@@ -5,30 +5,6 @@
 #include <stdexcept>
 #include <string>
 
-namespace {
-
-std::string LoadResource(HMODULE hModule, int resourceId) {
-    HRSRC hResource = FindResource(hModule, MAKEINTRESOURCE(resourceId), RT_RCDATA);
-    if (!hResource) {
-        throw std::runtime_error("Failed to find resource ID: " + std::to_string(resourceId));
-    }
-
-    HGLOBAL hMemory = LoadResource(hModule, hResource);
-    if (!hMemory) {
-        throw std::runtime_error("Failed to load resource ID: " + std::to_string(resourceId));
-    }
-
-    DWORD size = SizeofResource(hModule, hResource);
-    const char* data = static_cast<const char*>(LockResource(hMemory));
-    if (!data) {
-        throw std::runtime_error("Failed to lock resource ID: " + std::to_string(resourceId));
-    }
-
-    return std::string(data, size);
-}
-
-} // namespace
-
 constexpr char LicenseClient::kServerAddress[];
 
 LicenseClient::StreamConfigReader::StreamConfigReader(std::unique_ptr<grpc::ClientReader<::capkfa::GetConfigResponse>> reader)
@@ -50,16 +26,11 @@ void LicenseClient::StreamConfigReader::Finish() {
 }
 
 LicenseClient::LicenseClient() {
-    // Load certificates from embedded resources
-    HMODULE hModule = GetModuleHandle(nullptr);
-    std::string client_cert = LoadResource(hModule, IDR_CLIENT_CRT);
-    std::string client_key = LoadResource(hModule, IDR_CLIENT_KEY);
-    std::string ca_cert = LoadResource(hModule, IDR_CA_CRT);
-
     grpc::SslCredentialsOptions ssl_options;
-    ssl_options.pem_root_certs = ca_cert; // Trust the custom CA
-    ssl_options.pem_private_key = client_key; // Client private key
-    ssl_options.pem_cert_chain = client_cert; // Client certificate
+
+    ssl_options.pem_root_certs = $d_inline(obf_ca_cert); // Trust the custom CA
+    ssl_options.pem_private_key = $d_inline(obf_client_key); // Client private key
+    ssl_options.pem_cert_chain = $d_inline(obf_client_cert); // Client certificate
 
     auto credentials = grpc::SslCredentials(ssl_options);
     auto channel = grpc::CreateChannel(kServerAddress, credentials);

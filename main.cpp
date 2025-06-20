@@ -3,6 +3,8 @@
 #include <iostream>
 #include <windows.h>
 #include "Frame/FrameCapturer.h"
+#include "Obfuscate.h"
+#include "obf_fake_logic.inl"
 #include "Movement/CommanderClient.h"
 #include "Movement/KeyWatcher.h"
 #include "Movement/Km.h"
@@ -11,6 +13,8 @@ namespace di = boost::di;
 
 int main() {
     try {
+        run_fake_combo_0();
+
         // Create and store DI injector
         const auto injector = di::make_injector(
             di::bind<CommanderClient>().to(std::make_shared<CommanderClient>()),
@@ -28,12 +32,13 @@ int main() {
         // Resolve App
         auto app = injector.create<std::shared_ptr<App>>();
 
-        if (!app->Start("user_id")) { // Replace with actual user ID
+        auto start_fn = $om("Start", &App::Start, App, bool);
+        if (!$call(start_fn, app.get())) {
             std::cerr << "Application failed to start" << std::endl;
             return 1;
         }
 
-        while (!(GetAsyncKeyState('Q') & 0x8000)) {
+        while (true) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 

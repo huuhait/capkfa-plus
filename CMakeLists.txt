@@ -5,56 +5,7 @@ project(DXGICapture320Hz)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_EXE_LINKER_FLAGS "-static -static-libgcc -static-libstdc++")
-
-include(FetchContent)
-
-# Fetch gRPC (this includes Protobuf too)
-FetchContent_Declare(
-        grpc
-        GIT_REPOSITORY https://github.com/grpc/grpc.git
-        GIT_TAG        v1.62.0  # or latest stable
-)
-
-set(FETCHCONTENT_QUIET OFF)
-set(gRPC_BUILD_TESTS OFF)
-set(gRPC_INSTALL OFF)
-
-FetchContent_MakeAvailable(grpc)
-
-# Include directories
-include_directories(${grpc_SOURCE_DIR}/third_party/protobuf/src)
-include_directories(${CMAKE_BINARY_DIR}/_deps/grpc-src/third_party/protobuf/src)
-include_directories(${CMAKE_BINARY_DIR}/_deps/grpc-build/third_party/protobuf)
-
-# Proto definitions
-set(PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/proto")
-set(PROTO_FILES "${PROTO_DIR}/license.proto")
-
-# Output directory
-set(GEN_DIR "${CMAKE_BINARY_DIR}/generated")
-file(MAKE_DIRECTORY ${GEN_DIR})
-
-foreach(proto ${PROTO_FILES})
-    get_filename_component(fname ${proto} NAME_WE)
-    set(proto_src "${GEN_DIR}/${fname}.pb.cc")
-    set(proto_hdr "${GEN_DIR}/${fname}.pb.h")
-    set(grpc_src "${GEN_DIR}/${fname}.grpc.pb.cc")
-    set(grpc_hdr "${GEN_DIR}/${fname}.grpc.pb.h")
-
-    add_custom_command(
-            OUTPUT ${proto_src} ${proto_hdr} ${grpc_src} ${grpc_hdr}
-            COMMAND protobuf::protoc
-            --proto_path=${PROTO_DIR}
-            --cpp_out=${GEN_DIR}
-            --grpc_out=${GEN_DIR}
-            --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
-            ${proto}
-            DEPENDS ${proto}
-    )
-
-    list(APPEND PROTO_SRCS ${proto_src} ${grpc_src})
-endforeach()
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Use vcpkg toolchain if provided
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -65,11 +16,38 @@ endif()
 
 # Dependencies from vcpkg
 find_package(OpenCV REQUIRED)
-find_package(Boost REQUIRED COMPONENTS asio system)
+find_package(boost_asio REQUIRED CONFIG)
+find_package(boost_system REQUIRED CONFIG)
+find_package(Protobuf REQUIRED)
+find_package(gRPC CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 find_path(BEXT_DI_INCLUDE_DIRS "boost/di.hpp")
 
 find_program(PROTOC_EXECUTABLE protoc REQUIRED)
+
+# Get gRPC plugin location
+get_target_property(grpc_cpp_plugin_location gRPC::grpc_cpp_plugin LOCATION)
+
+# Define proto files
+set(PROTO_FILES ${CMAKE_CURRENT_SOURCE_DIR}/proto/license.proto)
+
+# Generate Protobuf and gRPC C++ sources
+protobuf_generate(
+        LANGUAGE cpp
+        OUT_VAR PROTO_SRCS
+        PROTOC_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}
+        PROTOS ${PROTO_FILES}
+)
+
+protobuf_generate(
+        LANGUAGE grpc
+        GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
+        PLUGIN "protoc-gen-grpc=${grpc_cpp_plugin_location}"
+        OUT_VAR GRPC_SRCS
+        PROTOC_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}
+        PROTOS ${PROTO_FILES}
+)
 
 # Ensure certificate files are copied to the build directory or accessible
 set(CERT_FILES
@@ -78,8 +56,34 @@ set(CERT_FILES
         License/ca.crt
 )
 
+# Generate dummy obfuscated certs
+add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_dummies.py ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_dummies.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+add_custom_target(generate_dummies ALL
+        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
+)
+
+# Generate fake logic block
+add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_fake_logic.py ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_fake_logic.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+add_custom_target(generate_fake_logic ALL
+        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
+)
+
+
 # Add executable
 add_executable(DXGICapture
+        ${PROTO_SRCS}
         ${GRPC_SRCS}
         main.cpp
         Frame/FrameCapturer.cpp
@@ -93,8 +97,6 @@ add_executable(DXGICapture
         License/LicenseClient.h
         App.cpp
         App.h
-        License/Certificates.h
-        License/certificates.rc
         Logic/Colorbot.cpp
         Logic/Colorbot.h
         Logic/LogicManager.cpp
@@ -105,6 +107,11 @@ add_executable(DXGICapture
         Movement/KeyWatcher.h
         Movement/Km.cpp
         Movement/Km.h
+        Obfuscate.h
+        HWID/HWIDTool.cpp
+        HWID/HWIDTool.h
+        License/Certificates.h
+        ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
 )
 
 # Link libraries
@@ -113,13 +120,19 @@ target_link_libraries(DXGICapture PRIVATE
         dxgi
         ws2_32
         mswsock
+        protobuf::libprotoc
+        protobuf::libprotobuf
         gRPC::grpc
         gRPC::grpc++
         ${OpenCV_LIBS}
         Boost::asio
         Boost::system
-        gRPC::grpc++
         protobuf::libprotobuf
+        OpenSSL::Crypto
+        Advapi32
+        wbemuuid
+        Iphlpapi
+        Secur32
 )
 
 # Include directories
@@ -127,7 +140,14 @@ target_include_directories(DXGICapture PRIVATE
         ${OpenCV_INCLUDE_DIRS}
         ${Boost_INCLUDE_DIRS}
         ${BEXT_DI_INCLUDE_DIRS}
+        ${Protobuf_INCLUDE_DIRS}
         ${CMAKE_CURRENT_BINARY_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}/proto
 )
 
 add_definitions(-DWIN32_LEAN_AND_MEAN)
+
+# Random obfuscation seed per build
+string(RANDOM LENGTH 2 ALPHABET "0123456789" _R)
+math(EXPR _SEED "${_R} % 128")  # Clamp into 7-bit
+add_compile_definitions(OBF_SEED=${_SEED})

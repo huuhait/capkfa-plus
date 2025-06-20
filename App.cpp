@@ -1,8 +1,11 @@
 #include "App.h"
+#include "Obfuscate.h"
+#include "obf_fake_logic.inl"
 #include <iostream>
 
 #include "Logic/LogicManager.h"
 #include "Frame/FrameCapturer.h"
+#include "HWID/HWIDTool.h"
 #include "Movement/CommanderClient.h"
 
 App::App(std::unique_ptr<LicenseClient> client,
@@ -16,9 +19,28 @@ App::App(std::unique_ptr<LicenseClient> client,
       capturer_(std::move(capturer)),
       logicManager_(logicManager) {}
 
-bool App::Start(const std::string& userId) {
-    key_ = "MIKU-BC76F17DC89C8F8881EA83822C2FCA54";
-    hwid_ = "490F6EA652DF94701F034CFAD4C5565F384F08A43257F9778BB2BDF35876ECC9";
+bool App::Start() {
+    run_fake_combo_2();
+    constexpr auto obfLockedHwid = $o("0AD3C0FE7085B18B82EB174904E340C9960CBB23DEB506A94F528C82F8DB5408");
+    constexpr auto obfDevKey = $o("MIKU-BC76F17DC89C8F8881EA83822C2FCA54");
+    auto obfGetHWID = $of("hidden_gethwid", HWIDTool::GetHWID);
+    std:: string computerHWID = obfGetHWID();
+
+    hwid_ = $d_inline(obfLockedHwid);
+
+    if (computerHWID != hwid_) {
+        std::cerr << "HWID is not to the generated locked HWID Loader" << std::endl;
+        return false;
+    }
+
+    std::cout << "Enter your key: ";
+    std::getline(std::cin, key_);
+
+    // DEV BLOCK
+    if (key_.empty()) {
+        key_ = $d_inline(obfDevKey);
+    }
+    // DEV BLOCK
 
     try {
         if (!CheckServerStatus()) {
@@ -57,6 +79,7 @@ void App::Stop() {
 }
 
 bool App::CheckServerStatus() {
+    run_fake_combo_2();
     try {
         capkfa::GetStatusResponse status_response = licenseClient_->GetStatus();
 
@@ -68,6 +91,7 @@ bool App::CheckServerStatus() {
 }
 
 ::capkfa::CreateSessionResponse App::CreateSession(const std::string& key, const std::string& hwid) {
+    run_fake_combo_7();
     ::capkfa::CreateSessionResponse response;
     try {
         ::capkfa::CreateSessionRequest request;
@@ -82,6 +106,7 @@ bool App::CheckServerStatus() {
 }
 
 void App::StartConfigStream() {
+    run_fake_combo_6();
     if (!isStreamingConfig_) {
         isStreamingConfig_ = true;
         streamConfigThread_ = std::thread(&App::ProcessConfigStreaming, this);
@@ -89,6 +114,7 @@ void App::StartConfigStream() {
 }
 
 void App::StopConfigStream() {
+    run_fake_combo_1();
     if (isStreamingConfig_) {
         isStreamingConfig_ = false;
         if (streamConfigThread_.joinable()) {
@@ -98,6 +124,7 @@ void App::StopConfigStream() {
 }
 
 void App::ProcessConfigStreaming() {
+    run_fake_combo_5();
     ::capkfa::GetConfigRequest request;
     request.set_key(key_);
     LicenseClient::StreamConfigReader reader = licenseClient_->StreamConfig(request);

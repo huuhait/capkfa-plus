@@ -1,5 +1,0 @@
-#include "Certificates.h"
-
-IDR_CLIENT_CRT RCDATA "client.crt"
-IDR_CLIENT_KEY RCDATA "client.key"
-IDR_CA_CRT RCDATA "ca.crt"

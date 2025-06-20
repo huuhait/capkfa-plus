@@ -113,56 +113,60 @@ void Colorbot::DisplayFrame(const cv::UMat& frame, const std::string& windowName
 }
 
 void Colorbot::ProcessLoop() {
-    int frameCount = 0;
-    auto lastTime = std::chrono::steady_clock::now();
+    try {
+        int frameCount = 0;
+        auto lastTime = std::chrono::steady_clock::now();
 
-    while (isRunning_) {
-        if (bgrFrame_.empty() || hsvFrame_.empty() || mask_.empty()) {
-            continue; // Skip if buffers not initialized
-        }
-
-        auto currentTime = std::chrono::steady_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
-
-        if (duration >= 1000) {
-            float fps = (float)frameCount * 1000.0f / duration;
-            std::cout << "Handler FPS: " << fps << std::endl;
-            frameCount = 0;
-            lastTime = currentTime;
-        }
-
-        auto [frame, newVersion] = frameSlot_->GetFrame(lastFrameVersion_);
-        if (!frame.empty()) {
-            if (!keyWatcher_->IsHandlerKeyDown()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                continue;
+        while (isRunning_) {
+            if (bgrFrame_.empty() || hsvFrame_.empty() || mask_.empty()) {
+                continue; // Skip if buffers not initialized
             }
 
-            frameCount++;
-            lastFrameVersion_ = newVersion;
-            // DisplayFrame(frame, "Output Mask");
-            ConvertToBGR(frame);
-            ConvertToHSV();
-            FilterInRange();
+            auto currentTime = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
 
-            std::optional<cv::Point> point = GetHighestMaskPoint();
-            if (!point.has_value()) {
-                continue;
+            if (duration >= 1000) {
+                float fps = (float)frameCount * 1000.0f / duration;
+                // std::cout << "Handler FPS: " << fps << std::endl;
+                frameCount = 0;
+                lastTime = currentTime;
             }
 
-            capkfa::RemoteConfigAimType aimType = keyWatcher_->IsFlickKeyDown() ? remoteConfig_.aim().flick() : remoteConfig_.aim().aim();
-            auto [moveX, moveY] = CalculateCoordinates(point.value(), aimType);
+            auto [frame, newVersion] = frameSlot_->GetFrame(lastFrameVersion_);
+            if (!frame.empty()) {
+                if (!keyWatcher_->IsHandlerKeyDown()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
 
-            HandleFlick(moveX, moveY);
+                frameCount++;
+                lastFrameVersion_ = newVersion;
+                // DisplayFrame(frame, "Output Mask");
+                ConvertToBGR(frame);
+                ConvertToHSV();
+                FilterInRange();
 
-            if (moveX != 0 || moveY != 0) {
-                km_->Move(moveX, moveY);
+                std::optional<cv::Point> point = GetHighestMaskPoint();
+                if (!point.has_value()) {
+                    continue;
+                }
+
+                capkfa::RemoteConfigAimType aimType = keyWatcher_->IsFlickKeyDown() ? remoteConfig_.aim().flick() : remoteConfig_.aim().aim();
+                auto [moveX, moveY] = CalculateCoordinates(point.value(), aimType);
+
+                HandleFlick(moveX, moveY);
+
+                if (moveX != 0 || moveY != 0) {
+                    km_->Move(moveX, moveY);
+                }
             }
         }
-
-        if (GetAsyncKeyState('Q')) {
-            isRunning_ = false;
-        }
+    } catch (const std::exception& e) {
+        std::cerr << "Colorbot crashed: " << e.what() << std::endl;
+        isRunning_ = false;
+    } catch (...) {
+        std::cerr << "Colorbot crashed: Unknown error" << std::endl;
+        isRunning_ = false;
     }
 }
 

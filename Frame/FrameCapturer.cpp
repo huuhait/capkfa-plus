@@ -236,10 +236,6 @@ void FrameCapturer::CaptureLoop() {
             auto frameDuration = std::chrono::duration_cast<std::chrono::microseconds>(frameEnd - frameStart).count();
             frameTimes.push_back(frameDuration / 1000.0f);
 
-            if (GetAsyncKeyState('Q') & 0x8000) {
-                isCapturing_ = false;
-            }
-
             frameCount++;
             auto currentTime = std::chrono::steady_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
@@ -251,7 +247,7 @@ void FrameCapturer::CaptureLoop() {
                 float variance = 0.0f;
                 for (float t : frameTimes) variance += (t - mean) * (t - mean);
                 variance /= frameTimes.size();
-                std::cout << "Output " << outputIndex_ << " FPS: " << fps << ", Frame Time Variance: " << variance << "ms^2" << std::endl;
+                // std::cout << "Output " << outputIndex_ << " FPS: " << fps << ", Frame Time Variance: " << variance << "ms^2" << std::endl;
                 frameCount = 0;
                 frameTimes.clear();
                 lastTime = currentTime;

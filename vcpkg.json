@@ -6,8 +6,12 @@
       "name": "opencv",
       "features": ["opencl"]
     },
-    "boost-asio",
-    "boost-system",
-    "bext-di"
+    {
+      "name": "boost"
+    },
+    "bext-di",
+    "protobuf",
+    "grpc",
+    "openssl"
   ]
 }
