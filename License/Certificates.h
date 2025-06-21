@@ -1,8 +1,7 @@
 #ifndef CERTIFICATES_H
 #define CERTIFICATES_H
 
-#include "../Obfuscate.h"
-#include "obf_dummies.inl"
+#include "../include/Obfuscate.h"
 
 constexpr auto obf_client_cert = $o(R"(-----BEGIN CERTIFICATE-----
 MIIE9DCCAtygAwIBAgIUBA8UR7cKpxs1Y/9JhQitlMf8clAwDQYJKoZIhvcNAQEL

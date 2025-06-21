@@ -1,11 +1,10 @@
 #ifndef APP_H
 #define APP_H
 
-#include "License/LicenseClient.h"
-#include "Frame/FrameCapturer.h"
-#include "Logic/LogicManager.h"
-#include "Movement/CommanderClient.h"
-#include "obf_fake_logic.inl"
+#include "../../License/LicenseClient.h"
+#include "../../Frame/FrameCapturer.h"
+#include "../../Logic/LogicManager.h"
+#include "../../Movement/CommanderClient.h"
 #include <memory>
 #include <string>
 

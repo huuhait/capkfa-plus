@@ -5,7 +5,6 @@ project(DXGICapture320Hz)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Use vcpkg toolchain if provided
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -56,47 +55,47 @@ set(CERT_FILES
         License/ca.crt
 )
 
-# Generate dummy obfuscated certs
-add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_dummies.py ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_dummies.py
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-
-add_custom_target(generate_dummies ALL
-        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
-)
-
-# Generate fake logic block
-add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_fake_logic.py ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_fake_logic.py
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-
-add_custom_target(generate_fake_logic ALL
-        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
-)
+## Generate dummy obfuscated certs
+#add_custom_command(
+#        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
+#        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_dummies.py ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
+#        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_dummies.py
+#        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+#)
+#
+#add_custom_target(generate_dummies ALL
+#        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
+#)
+#
+## Generate fake logic block
+#add_custom_command(
+#        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
+#        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_fake_logic.py ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
+#        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_fake_logic.py
+#        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+#)
+#
+#add_custom_target(generate_fake_logic ALL
+#        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
+#)
 
 
 # Add executable
 add_executable(DXGICapture
         ${PROTO_SRCS}
         ${GRPC_SRCS}
-        main.cpp
+        Cmd/ObserveApp/main.cpp
         Frame/FrameCapturer.cpp
         Frame/FrameCapturer.h
-        Utils.h
+        include/Utils.h
         Frame/FrameSlot.cpp
         Frame/FrameSlot.h
         Frame/DeviceManager.cpp
         Frame/DeviceManager.h
         License/LicenseClient.cpp
         License/LicenseClient.h
-        App.cpp
-        App.h
+        Cmd/ObserveApp/App.cpp
+        Cmd/ObserveApp/App.h
         Logic/Colorbot.cpp
         Logic/Colorbot.h
         Logic/LogicManager.cpp
@@ -107,11 +106,10 @@ add_executable(DXGICapture
         Movement/KeyWatcher.h
         Movement/Km.cpp
         Movement/Km.h
-        Obfuscate.h
+        include/Obfuscate.h
         HWID/HWIDTool.cpp
         HWID/HWIDTool.h
         License/Certificates.h
-        ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
 )
 
 # Link libraries

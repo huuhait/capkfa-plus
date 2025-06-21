@@ -2,19 +2,16 @@
 #include <boost/di.hpp>
 #include <iostream>
 #include <windows.h>
-#include "Frame/FrameCapturer.h"
-#include "Obfuscate.h"
-#include "obf_fake_logic.inl"
-#include "Movement/CommanderClient.h"
-#include "Movement/KeyWatcher.h"
-#include "Movement/Km.h"
+#include "../../Frame/FrameCapturer.h"
+#include "../../include/Obfuscate.h"
+#include "../../Movement/CommanderClient.h"
+#include "../../Movement/KeyWatcher.h"
+#include "../../Movement/Km.h"
 
 namespace di = boost::di;
 
 int main() {
     try {
-        run_fake_combo_0();
-
         // Create and store DI injector
         const auto injector = di::make_injector(
             di::bind<CommanderClient>().to(std::make_shared<CommanderClient>()),
@@ -29,11 +26,10 @@ int main() {
             di::bind<KeyWatcher>().to<KeyWatcher>()
         );
 
-        // Resolve App
         auto app = injector.create<std::shared_ptr<App>>();
 
-        auto start_fn = $om("Start", &App::Start, App, bool);
-        if (!$call(start_fn, app.get())) {
+        auto start_fn = $om(Start, App, bool);
+        if (!$call(app.get(), start_fn)) {
             std::cerr << "Application failed to start" << std::endl;
             return 1;
         }

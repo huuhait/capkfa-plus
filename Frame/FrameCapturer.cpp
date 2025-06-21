@@ -4,9 +4,10 @@
 #include <vector>
 #include <chrono>
 #include <windows.h>
+#include "../include/Obfuscate.h"
 #include "FrameSlot.h"
 #include "DeviceManager.h"
-#include "../Utils.h"
+#include "../include/Utils.h"
 
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3d11.lib")
@@ -117,6 +118,22 @@ void FrameCapturer::StopCapture() {
 }
 
 void FrameCapturer::CaptureLoop() {
+    // Obfuscate error messages
+    constexpr auto obfErrDuplFailed = $o("Initial DuplicateOutput failed: ");
+    constexpr auto obfErrDevRemoved = $o("Device removed: ");
+    constexpr auto obfErrBadFormat = $o("Unexpected desktop texture format: ");
+    constexpr auto obfErrNullData = $o("Mapped data is null");
+    constexpr auto obfErrAllZero = $o("Captured frame data is all zeros");
+    constexpr auto obfErrEmptyFrame = $o("Captured frame is empty");
+    constexpr auto obfErrCrash = $o("CaptureLoop crashed: ");
+    constexpr auto obfErrUnknown = $o("CaptureLoop crashed: Unknown error");
+    constexpr auto obfQueryInterfaceTexture2D = $o("QueryInterface Texture2D");
+
+    auto obfAcquireNextFrame = $om(AcquireNextFrame, IDXGIOutputDuplication, HRESULT);
+    auto obfQueryInterface = $om2(QueryInterface, IDXGIResource, HRESULT);
+    auto obfGetDesc = $om(GetDesc, ID3D11Texture2D, void);
+    auto obfMap = $om(Map, ID3D11DeviceContext, HRESULT);
+
     try {
         int frameCount = 0;
         auto lastTime = std::chrono::steady_clock::now();
@@ -137,20 +154,20 @@ void FrameCapturer::CaptureLoop() {
 
             HRESULT hr = duplication ? S_OK : output1_->DuplicateOutput(device_.Get(), &duplication);
             if (FAILED(hr)) {
-                std::cerr << "Initial DuplicateOutput failed: " << _com_error(hr).ErrorMessage() << std::endl;
+                std::cerr << $d_inline(obfErrDuplFailed) << _com_error(hr).ErrorMessage() << std::endl;
                 isCapturing_ = false;
                 return;
             }
 
             DXGI_OUTDUPL_FRAME_INFO frameInfo;
             ComPtr<IDXGIResource> desktopResource;
-            hr = duplication->AcquireNextFrame(timeoutMs_, &frameInfo, &desktopResource);
+            hr = $call(duplication.Get(), obfAcquireNextFrame, timeoutMs_, &frameInfo, &desktopResource);
             if (hr == DXGI_ERROR_ACCESS_LOST) {
                 duplication.Reset();
                 continue;
             }
             if (hr == DXGI_ERROR_DEVICE_REMOVED) {
-                std::cerr << "Device removed: " << _com_error(hr).ErrorMessage() << std::endl;
+                std::cerr << $d_inline(obfErrDevRemoved) << _com_error(hr).ErrorMessage() << std::endl;
                 isCapturing_ = false;
                 return;
             }
@@ -159,12 +176,12 @@ void FrameCapturer::CaptureLoop() {
             }
 
             ComPtr<ID3D11Texture2D> desktopTexture;
-            CheckHRESULT(desktopResource->QueryInterface(IID_PPV_ARGS(&desktopTexture)), "QueryInterface Texture2D");
+            CheckHRESULT($call2(desktopResource.Get(), obfQueryInterface, IID_PPV_ARGS(&desktopTexture)), std::string($d_inline(obfQueryInterfaceTexture2D)));
 
             D3D11_TEXTURE2D_DESC desc;
-            desktopTexture->GetDesc(&desc);
+            $call(desktopTexture.Get(), obfGetDesc, &desc);
             if (desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
-                std::cerr << "Unexpected desktop texture format: " << desc.Format << std::endl;
+                std::cerr << $d_inline(obfErrBadFormat) << desc.Format << std::endl;
                 duplication->ReleaseFrame();
                 continue;
             }
@@ -181,42 +198,49 @@ void FrameCapturer::CaptureLoop() {
             context_->CopySubresourceRegion(stagingTexture_.Get(), 0, 0, 0, 0, desktopTexture.Get(), 0, &srcBox);
 
             D3D11_MAPPED_SUBRESOURCE mapped;
-            CheckHRESULT(context_->Map(stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map");
+            CheckHRESULT($call(context_.Get(), obfMap, stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map");
 
             if (mapped.pData == nullptr) {
-                std::cerr << "Mapped data is null" << std::endl;
+                std::cerr << $d_inline(obfErrNullData) << std::endl;
                 context_->Unmap(stagingTexture_.Get(), 0);
                 duplication->ReleaseFrame();
                 continue;
             }
 
+            // Obfuscate frame data validation and copying with VM
             uint8_t* src = (uint8_t*)mapped.pData;
             cv::Mat temp(captureHeight_, captureWidth_, CV_8UC4);
             uint8_t* dst = temp.data;
             bool allZero = true;
-            if (mapped.RowPitch == captureWidth_ * 4) {
-                memcpy(dst, src, captureWidth_ * captureHeight_ * 4);
-                for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
-                    if (dst[i] != 0) {
-                        allZero = false;
-                        break;
+            constexpr uint8_t bytecode[] = {1, 2, 3};
+            auto vm_block = [this, &temp, &allZero, src, dst, &mapped](uint8_t instr) {
+                switch (instr) {
+                    VM_CASE(1) {
+                        if (mapped.RowPitch == captureWidth_ * 4) {
+                            memcpy(dst, src, captureWidth_ * captureHeight_ * 4);
+                        } else {
+                            for (int i = 0; i < captureHeight_; ++i) {
+                                memcpy(dst + i * captureWidth_ * 4, src + i * mapped.RowPitch, captureWidth_ * 4);
+                            }
+                        }
+                    }
+                    VM_CASE(2) {
+                        for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
+                            if (dst[i] != 0) {
+                                allZero = false;
+                                break;
+                            }
+                        }
+                    }
+                    VM_CASE(3) {
+                        context_->Unmap(stagingTexture_.Get(), 0);
                     }
                 }
-            } else {
-                for (int i = 0; i < captureHeight_; ++i) {
-                    memcpy(dst + i * captureWidth_ * 4, src + i * mapped.RowPitch, captureWidth_ * 4);
-                }
-                for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
-                    if (dst[i] != 0) {
-                        allZero = false;
-                        break;
-                    }
-                }
-            }
-            context_->Unmap(stagingTexture_.Get(), 0);
+            };
+            OBF_VM_FUNCTION(bytecode, vm_block);
 
             if (allZero) {
-                std::cerr << "Captured frame data is all zeros" << std::endl;
+                std::cerr << $d_inline(obfErrAllZero) << std::endl;
                 duplication->ReleaseFrame();
                 continue;
             }
@@ -225,12 +249,14 @@ void FrameCapturer::CaptureLoop() {
             cv::ocl::finish();
 
             if (frame_.empty()) {
-                std::cerr << "Captured frame is empty" << std::endl;
+                std::cerr << $d_inline(obfErrEmptyFrame) << std::endl;
                 duplication->ReleaseFrame();
                 continue;
             }
 
-            frameSlot_->StoreFrame(frame_);
+            // Obfuscate FrameSlot::StoreFrame call
+            auto obfStoreFrame = $om(StoreFrame, FrameSlot, void);
+            $call(frameSlot_.get(), obfStoreFrame, frame_);
 
             auto frameEnd = std::chrono::steady_clock::now();
             auto frameDuration = std::chrono::duration_cast<std::chrono::microseconds>(frameEnd - frameStart).count();
@@ -256,10 +282,10 @@ void FrameCapturer::CaptureLoop() {
             duplication->ReleaseFrame();
         }
     } catch (const std::exception& e) {
-        std::cerr << "CaptureLoop crashed: " << e.what() << std::endl;
+        std::cerr << $d_inline(obfErrCrash) << e.what() << std::endl;
         isCapturing_ = false;
     } catch (...) {
-        std::cerr << "CaptureLoop crashed: Unknown error" << std::endl;
+        std::cerr << $d_inline(obfErrUnknown) << std::endl;
         isCapturing_ = false;
     }
 }

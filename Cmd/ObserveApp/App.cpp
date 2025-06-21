@@ -1,12 +1,11 @@
 #include "App.h"
-#include "Obfuscate.h"
-#include "obf_fake_logic.inl"
+#include "../../include/Obfuscate.h"
 #include <iostream>
 
-#include "Logic/LogicManager.h"
-#include "Frame/FrameCapturer.h"
-#include "HWID/HWIDTool.h"
-#include "Movement/CommanderClient.h"
+#include "../../Logic/LogicManager.h"
+#include "../../Frame/FrameCapturer.h"
+#include "../../HWID/HWIDTool.h"
+#include "../../Movement/CommanderClient.h"
 
 App::App(std::unique_ptr<LicenseClient> client,
          std::shared_ptr<CommanderClient> commanderClient,
@@ -20,10 +19,9 @@ App::App(std::unique_ptr<LicenseClient> client,
       logicManager_(logicManager) {}
 
 bool App::Start() {
-    run_fake_combo_2();
     constexpr auto obfLockedHwid = $o("0AD3C0FE7085B18B82EB174904E340C9960CBB23DEB506A94F528C82F8DB5408");
     constexpr auto obfDevKey = $o("MIKU-BC76F17DC89C8F8881EA83822C2FCA54");
-    auto obfGetHWID = $of("hidden_gethwid", HWIDTool::GetHWID);
+    auto obfGetHWID = $of(HWIDTool::GetHWID);
     std:: string computerHWID = obfGetHWID();
 
     hwid_ = $d_inline(obfLockedHwid);
@@ -43,12 +41,14 @@ bool App::Start() {
     // DEV BLOCK
 
     try {
-        if (!CheckServerStatus()) {
+        auto obfCheckStatusFunc = $om(CheckServerStatus, App, bool);
+        if (!$call(this, obfCheckStatusFunc)) {
             std::cerr << "Server not available" << std::endl;
             return false;
         }
 
-        auto create_session_response = CreateSession(key_, hwid_);
+        auto obfCreateSessionFunc = $om(CreateSession, App, ::capkfa::CreateSessionResponse);
+        auto create_session_response = $call(this, obfCreateSessionFunc, key_, hwid_);
         if (!create_session_response.valid()) {
             std::cerr << "Session creation failed" << std::endl;
             return false;
@@ -56,7 +56,8 @@ bool App::Start() {
 
         std::cout << "Session ID: " << create_session_response.session_id() << std::endl;
 
-        StartConfigStream();
+        auto obfStartConfigStreamFunc = $om(StartConfigStream, App, void);
+        $call(this, obfStartConfigStreamFunc);
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Start failed: " << e.what() << std::endl;
@@ -66,20 +67,30 @@ bool App::Start() {
 
 void App::Stop() {
     try {
-        if (capturer_) {
-            capturer_->StopCapture();
-        }
-        if (logicManager_) {
-            logicManager_->Stop();
-        }
-        StopConfigStream();
+        constexpr uint8_t bytecode[] = {1, 2, 3};
+        OBF_VM_FUNCTION(bytecode, [this](uint8_t instr) {
+            switch (instr) {
+                VM_CASE(1) {
+                    if (capturer_) {
+                        capturer_->StopCapture();
+                    }
+                }
+                VM_CASE(2) {
+                    if (logicManager_) {
+                        logicManager_->Stop();
+                    }
+                }
+                VM_CASE(3) {
+                    StopConfigStream();
+                }
+            }
+        });
     } catch (const std::exception& e) {
         std::cerr << "Stop failed: " << e.what() << std::endl;
     }
 }
 
 bool App::CheckServerStatus() {
-    run_fake_combo_2();
     try {
         capkfa::GetStatusResponse status_response = licenseClient_->GetStatus();
 
@@ -91,7 +102,6 @@ bool App::CheckServerStatus() {
 }
 
 ::capkfa::CreateSessionResponse App::CreateSession(const std::string& key, const std::string& hwid) {
-    run_fake_combo_7();
     ::capkfa::CreateSessionResponse response;
     try {
         ::capkfa::CreateSessionRequest request;
@@ -106,7 +116,6 @@ bool App::CheckServerStatus() {
 }
 
 void App::StartConfigStream() {
-    run_fake_combo_6();
     if (!isStreamingConfig_) {
         isStreamingConfig_ = true;
         streamConfigThread_ = std::thread(&App::ProcessConfigStreaming, this);
@@ -114,7 +123,6 @@ void App::StartConfigStream() {
 }
 
 void App::StopConfigStream() {
-    run_fake_combo_1();
     if (isStreamingConfig_) {
         isStreamingConfig_ = false;
         if (streamConfigThread_.joinable()) {
@@ -124,7 +132,6 @@ void App::StopConfigStream() {
 }
 
 void App::ProcessConfigStreaming() {
-    run_fake_combo_5();
     ::capkfa::GetConfigRequest request;
     request.set_key(key_);
     LicenseClient::StreamConfigReader reader = licenseClient_->StreamConfig(request);
@@ -133,14 +140,27 @@ void App::ProcessConfigStreaming() {
     bool started = false;
 
     while (reader.Read(response) && isStreamingConfig_) {
-        capturer_->SetConfig(response.remote_config());
-        logicManager_->SetConfig(response.remote_config());
-        keyWatcher_->SetConfig(response.remote_config());
-        if (!started) {
-            // this used to prevent reconnect of the commander
-            commanderClient_->SetConfig(response.remote_config());
-            started = true;
-        }
+        constexpr uint8_t bytecode[] = {1, 2, 3, 4};
+        auto vm_block = [this, &response, &started](uint8_t instr) {
+            switch (instr) {
+                VM_CASE(1) {
+                    if (capturer_) capturer_->SetConfig(response.remote_config());
+                }
+                VM_CASE(2) {
+                    if (logicManager_) logicManager_->SetConfig(response.remote_config());
+                }
+                VM_CASE(3) {
+                    if (keyWatcher_) keyWatcher_->SetConfig(response.remote_config());
+                }
+                VM_CASE(4) {
+                    if (!started && commanderClient_) {
+                        commanderClient_->SetConfig(response.remote_config());
+                        started = true;
+                    }
+                }
+            }
+        };
+        OBF_VM_FUNCTION(bytecode, vm_block);
     }
 
     reader.Finish();
