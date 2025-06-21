@@ -135,11 +135,22 @@ void run_vm(const VMBytecode<N>& bytecode, F&& block) {
     }
 }
 
+template <size_t N, typename F>
+void run_vm_dynamic(const std::array<uint8_t, N>& bytecode, uint8_t key, F&& block) {
+    for (size_t i = 0; i < N; ++i) {
+        uint8_t instr = bytecode[i] ^ key;
+        block(instr);
+    }
+}
+
 #define OBF_VM_FUNCTION(byte_array, block) \
     do { \
         constexpr ChineseObf::VMBytecode<sizeof(byte_array)> bc(byte_array); \
         ChineseObf::run_vm(bc, block); \
     } while (false)
+
+#define OBF_VM_FUNCTION_DYNAMIC(bytecode, key, block) \
+    ChineseObf::run_vm_dynamic(bytecode, key, block)
 
 #define VM_CASE(val) case val:
 

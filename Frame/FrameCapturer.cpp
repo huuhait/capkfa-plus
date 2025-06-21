@@ -150,33 +150,63 @@ void FrameCapturer::CaptureLoop() {
                 continue;
             }
 
+            // Behavioral obfuscation: Reduced random delay
+            if (rand() % 100 < 10) { // 10% chance
+                std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 3)); // 0-2ms
+            }
+
             auto frameStart = std::chrono::steady_clock::now();
 
-            HRESULT hr = duplication ? S_OK : output1_->DuplicateOutput(device_.Get(), &duplication);
-            if (FAILED(hr)) {
-                std::cerr << $d_inline(obfErrDuplFailed) << _com_error(hr).ErrorMessage() << std::endl;
-                isCapturing_ = false;
-                return;
-            }
-
-            DXGI_OUTDUPL_FRAME_INFO frameInfo;
+            // VM block for DXGI operations
+            HRESULT hr = S_OK;
             ComPtr<IDXGIResource> desktopResource;
-            hr = $call(duplication.Get(), obfAcquireNextFrame, timeoutMs_, &frameInfo, &desktopResource);
-            if (hr == DXGI_ERROR_ACCESS_LOST) {
-                duplication.Reset();
-                continue;
-            }
-            if (hr == DXGI_ERROR_DEVICE_REMOVED) {
-                std::cerr << $d_inline(obfErrDevRemoved) << _com_error(hr).ErrorMessage() << std::endl;
-                isCapturing_ = false;
-                return;
-            }
-            if (hr == DXGI_ERROR_WAIT_TIMEOUT || FAILED(hr)) {
+            ComPtr<ID3D11Texture2D> desktopTexture;
+            DXGI_OUTDUPL_FRAME_INFO frameInfo;
+
+            // Generate random key for bytecode randomization
+            uint8_t key = static_cast<uint8_t>(rand() % 256);
+
+            // Step 1: DuplicateOutput
+            std::array<uint8_t, 1> bytecode_dupl = {static_cast<uint8_t>(1 ^ key)};
+            auto vm_block_dupl = [&](uint8_t instr) {
+                if (instr == 1) {
+                    hr = duplication ? S_OK : output1_->DuplicateOutput(device_.Get(), &duplication);
+                    if (FAILED(hr)) {
+                        std::cerr << $d_inline(obfErrDuplFailed) << _com_error(hr).ErrorMessage() << std::endl;
+                        isCapturing_ = false;
+                    }
+                }
+            };
+            OBF_VM_FUNCTION_DYNAMIC(bytecode_dupl, key, vm_block_dupl);
+            if (FAILED(hr)) continue;
+
+            // Step 2: AcquireNextFrame
+            std::array<uint8_t, 1> bytecode_acquire = {static_cast<uint8_t>(2 ^ key)};
+            auto vm_block_acquire = [&](uint8_t instr) {
+                if (instr == 2) {
+                    hr = $call(duplication.Get(), obfAcquireNextFrame, timeoutMs_, &frameInfo, &desktopResource);
+                    if (hr == DXGI_ERROR_ACCESS_LOST) {
+                        duplication.Reset();
+                        hr = DXGI_ERROR_ACCESS_LOST;
+                    } else if (hr == DXGI_ERROR_DEVICE_REMOVED) {
+                        std::cerr << $d_inline(obfErrDevRemoved) << _com_error(hr).ErrorMessage() << std::endl;
+                        isCapturing_ = false;
+                    }
+                }
+            };
+            OBF_VM_FUNCTION_DYNAMIC(bytecode_acquire, key, vm_block_acquire);
+            if (hr == DXGI_ERROR_ACCESS_LOST || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_WAIT_TIMEOUT || FAILED(hr)) {
                 continue;
             }
 
-            ComPtr<ID3D11Texture2D> desktopTexture;
-            CheckHRESULT($call2(desktopResource.Get(), obfQueryInterface, IID_PPV_ARGS(&desktopTexture)), std::string($d_inline(obfQueryInterfaceTexture2D)));
+            // Step 3: QueryInterface
+            std::array<uint8_t, 1> bytecode_query = {static_cast<uint8_t>(3 ^ key)};
+            auto vm_block_query = [&](uint8_t instr) {
+                if (instr == 3) {
+                    CheckHRESULT($call2(desktopResource.Get(), obfQueryInterface, IID_PPV_ARGS(&desktopTexture)), std::string($d_inline(obfQueryInterfaceTexture2D)));
+                }
+            };
+            OBF_VM_FUNCTION_DYNAMIC(bytecode_query, key, vm_block_query);
 
             D3D11_TEXTURE2D_DESC desc;
             $call(desktopTexture.Get(), obfGetDesc, &desc);
@@ -207,37 +237,39 @@ void FrameCapturer::CaptureLoop() {
                 continue;
             }
 
-            // Obfuscate frame data validation and copying with VM
+            // VM block for frame data validation and copying
             uint8_t* src = (uint8_t*)mapped.pData;
             cv::Mat temp(captureHeight_, captureWidth_, CV_8UC4);
             uint8_t* dst = temp.data;
             bool allZero = true;
-            constexpr uint8_t bytecode[] = {1, 2, 3};
-            auto vm_block = [this, &temp, &allZero, src, dst, &mapped](uint8_t instr) {
-                switch (instr) {
-                    VM_CASE(1) {
-                        if (mapped.RowPitch == captureWidth_ * 4) {
-                            memcpy(dst, src, captureWidth_ * captureHeight_ * 4);
-                        } else {
-                            for (int i = 0; i < captureHeight_; ++i) {
-                                memcpy(dst + i * captureWidth_ * 4, src + i * mapped.RowPitch, captureWidth_ * 4);
-                            }
+            std::array<uint8_t, 3> bytecode_data = {
+                static_cast<uint8_t>(1 ^ key),
+                static_cast<uint8_t>(2 ^ key),
+                static_cast<uint8_t>(3 ^ key)
+            };
+            auto vm_block_data = [this, &temp, &allZero, src, dst, &mapped](uint8_t instr) {
+                if (instr == 1) {
+                    if (mapped.RowPitch == captureWidth_ * 4) {
+                        memcpy(dst, src, captureWidth_ * captureHeight_ * 4);
+                    } else {
+                        for (int i = 0; i < captureHeight_; ++i) {
+                            memcpy(dst + i * captureWidth_ * 4, src + i * mapped.RowPitch, captureWidth_ * 4);
                         }
-                    }
-                    VM_CASE(2) {
-                        for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
-                            if (dst[i] != 0) {
-                                allZero = false;
-                                break;
-                            }
-                        }
-                    }
-                    VM_CASE(3) {
-                        context_->Unmap(stagingTexture_.Get(), 0);
                     }
                 }
+                if (instr == 2) {
+                    for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
+                        if (dst[i] != 0) {
+                            allZero = false;
+                            break;
+                        }
+                    }
+                }
+                if (instr == 3) {
+                    context_->Unmap(stagingTexture_.Get(), 0);
+                }
             };
-            OBF_VM_FUNCTION(bytecode, vm_block);
+            OBF_VM_FUNCTION_DYNAMIC(bytecode_data, key, vm_block_data);
 
             if (allZero) {
                 std::cerr << $d_inline(obfErrAllZero) << std::endl;
@@ -273,7 +305,7 @@ void FrameCapturer::CaptureLoop() {
                 float variance = 0.0f;
                 for (float t : frameTimes) variance += (t - mean) * (t - mean);
                 variance /= frameTimes.size();
-                // std::cout << "Output " << outputIndex_ << " FPS: " << fps << ", Frame Time Variance: " << variance << "ms^2" << std::endl;
+                std::cout << "Output " << outputIndex_ << " FPS: " << fps << ", Frame Time Variance: " << variance << "ms^2" << std::endl;
                 frameCount = 0;
                 frameTimes.clear();
                 lastTime = currentTime;
