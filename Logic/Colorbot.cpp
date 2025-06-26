@@ -20,6 +20,7 @@ Colorbot::~Colorbot() {
 }
 
 void Colorbot::Start() {
+    std::cout << "Starting Colorbot" << std::endl;
     if (!isRunning_) {
         if (bgrFrame_.empty() || hsvFrame_.empty() || mask_.empty()) {
             std::cerr << "Warning: Colorbot not configured. Call SetConfig to enable processing." << std::endl;
@@ -127,38 +128,40 @@ void Colorbot::ProcessLoop() {
 
             if (duration >= 1000) {
                 float fps = (float)frameCount * 1000.0f / duration;
-                // std::cout << "Handler FPS: " << fps << std::endl;
+                std::cout << "Handler CL FPS: " << fps << std::endl;
                 frameCount = 0;
                 lastTime = currentTime;
             }
 
             auto [frame, newVersion] = frameSlot_->GetFrame(lastFrameVersion_);
-            if (!frame.empty()) {
-                if (!keyWatcher_->IsHandlerKeyDown()) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    continue;
-                }
+            if (!frame.IsValid()) {
+                continue;
+            }
 
-                frameCount++;
-                lastFrameVersion_ = newVersion;
-                // DisplayFrame(frame, "Output Mask");
-                ConvertToBGR(frame);
-                ConvertToHSV();
-                FilterInRange();
+            if (!keyWatcher_->IsHandlerKeyDown()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
 
-                std::optional<cv::Point> point = GetHighestMaskPoint();
-                if (!point.has_value()) {
-                    continue;
-                }
+            frameCount++;
+            lastFrameVersion_ = newVersion;
+            // DisplayFrame(frame, "Output Mask");
+            ConvertToBGR(frame.ToUMat());
+            ConvertToHSV();
+            FilterInRange();
 
-                capkfa::RemoteConfigAimType aimType = keyWatcher_->IsFlickKeyDown() ? remoteConfig_.aim().flick() : remoteConfig_.aim().aim();
-                auto [moveX, moveY] = CalculateCoordinates(point.value(), aimType);
+            std::optional<cv::Point> point = GetHighestMaskPoint();
+            if (!point.has_value()) {
+                continue;
+            }
 
-                HandleFlick(moveX, moveY);
+            capkfa::RemoteConfigAimType aimType = keyWatcher_->IsFlickKeyDown() ? remoteConfig_.aim().flick() : remoteConfig_.aim().aim();
+            auto [moveX, moveY] = CalculateCoordinates(point.value(), aimType);
 
-                if (moveX != 0 || moveY != 0) {
-                    km_->Move(moveX, moveY);
-                }
+            HandleFlick(moveX, moveY);
+
+            if (moveX != 0 || moveY != 0) {
+                km_->Move(moveX, moveY);
             }
         }
     } catch (const std::exception& e) {

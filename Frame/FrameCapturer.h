@@ -30,7 +30,6 @@ private:
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
     ComPtr<ID3D11Texture2D> stagingTexture_;
-    cv::UMat frame_;
     UINT outputIndex_;
     int refreshRate_;
     UINT timeoutMs_;

@@ -4,14 +4,14 @@
   "dependencies": [
     {
       "name": "opencv",
-      "features": ["opencl"]
+      "features": ["highgui", "opencl", "dnn"]
     },
-    {
-      "name": "boost"
-    },
+    "boost-asio",
+    "boost-system",
     "bext-di",
     "protobuf",
     "grpc",
-    "openssl"
+    "openssl",
+    "cuda"
   ]
 }

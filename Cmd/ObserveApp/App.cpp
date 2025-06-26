@@ -19,25 +19,25 @@ App::App(std::unique_ptr<LicenseClient> client,
       logicManager_(logicManager) {}
 
 bool App::Start() {
-    constexpr auto obfLockedHwid = $o("0AD3C0FE7085B18B82EB174904E340C9960CBB23DEB506A94F528C82F8DB5408");
+    constexpr auto obfLockedHwid = $o("16F24F4AE3D7102990E9CF9AFA65E3B33952A6CD8D04E29221B73EE519A99109");
     constexpr auto obfDevKey = $o("MIKU-BC76F17DC89C8F8881EA83822C2FCA54");
     auto obfGetHWID = $of(HWIDTool::GetHWID);
     std:: string computerHWID = obfGetHWID();
 
     hwid_ = $d_inline(obfLockedHwid);
 
-    if (computerHWID != hwid_) {
-        std::cerr << "HWID is not to the generated locked HWID Loader" << std::endl;
-        return false;
-    }
+    // if (computerHWID != hwid_) {
+    //     std::cerr << "HWID is not to the generated locked HWID Loader" << std::endl;
+    //     return false;
+    // }
 
-    std::cout << "Enter your key: ";
-    std::getline(std::cin, key_);
+    // std::cout << "Enter your key: ";
+    // std::getline(std::cin, key_);
 
     // DEV BLOCK
-    if (key_.empty()) {
+    // if (key_.empty()) {
         key_ = $d_inline(obfDevKey);
-    }
+    // }
     // DEV BLOCK
 
     try {

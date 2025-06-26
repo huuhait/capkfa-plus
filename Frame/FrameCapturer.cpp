@@ -1,5 +1,4 @@
 #include "FrameCapturer.h"
-#include <opencv2/core/ocl.hpp>
 #include <iostream>
 #include <vector>
 #include <chrono>
@@ -31,10 +30,15 @@ int GetMonitorRefreshRate(ComPtr<IDXGIOutput> output) {
     return maxRefreshRate;
 }
 
-FrameCapturer::FrameCapturer(const DeviceManager& deviceManager, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot, std::shared_ptr<KeyWatcher> keyWatcher)
-    : output1_(deviceManager.GetOutput()), device_(deviceManager.GetDevice()), context_(deviceManager.GetContext()),
-      outputIndex_(outputIndex), frameSlot_(frameSlot), keyWatcher_(keyWatcher), isCapturing_(false), captureWidth_(0), captureHeight_(0),
+FrameCapturer::FrameCapturer(const DeviceManager& deviceManager, UINT outputIndex,
+                             std::shared_ptr<FrameSlot> frameSlot, std::shared_ptr<KeyWatcher> keyWatcher)
+    : output1_(deviceManager.GetOutput()), device_(deviceManager.GetDevice()),
+      context_(deviceManager.GetContext()), outputIndex_(outputIndex), frameSlot_(frameSlot),
+      keyWatcher_(keyWatcher), isCapturing_(false), captureWidth_(0), captureHeight_(0),
       offsetX_(0), offsetY_(0), refreshRate_(0), timeoutMs_(0) {
+    std::cout << "FrameCapturer constructed: outputIndex=" << outputIndex
+              << ", frameSlot=" << (frameSlot ? "valid" : "null")
+              << ", keyWatcher=" << (keyWatcher ? "valid" : "null") << std::endl;
 }
 
 FrameCapturer::~FrameCapturer() {
@@ -86,7 +90,6 @@ void FrameCapturer::SetConfig(const ::capkfa::RemoteConfig& config) {
 
     stagingTexture_.Reset();
     CreateStagingTexture();
-    frame_ = cv::UMat(captureHeight_, captureWidth_, CV_8UC4);
 
     std::cout << "Capture config set: size " << captureWidth_ << "x" << captureHeight_
               << ", centered offset (" << offsetX_ << "," << offsetY_ << "), "
@@ -97,9 +100,6 @@ void FrameCapturer::SetConfig(const ::capkfa::RemoteConfig& config) {
 
 void FrameCapturer::StartCapture() {
     if (!isCapturing_) {
-        if (frame_.empty()) {
-            std::cerr << "Warning: FrameCapturer not configured. Call SetConfig to enable capture." << std::endl;
-        }
         isCapturing_ = true;
         captureThread_ = std::thread(&FrameCapturer::CaptureLoop, this);
     }
@@ -111,9 +111,7 @@ void FrameCapturer::StopCapture() {
         if (captureThread_.joinable()) {
             captureThread_.join();
         }
-        // Clear resources
         stagingTexture_.Reset();
-        frame_ = cv::UMat();
     }
 }
 
@@ -123,8 +121,6 @@ void FrameCapturer::CaptureLoop() {
     constexpr auto obfErrDevRemoved = $o("Device removed: ");
     constexpr auto obfErrBadFormat = $o("Unexpected desktop texture format: ");
     constexpr auto obfErrNullData = $o("Mapped data is null");
-    constexpr auto obfErrAllZero = $o("Captured frame data is all zeros");
-    constexpr auto obfErrEmptyFrame = $o("Captured frame is empty");
     constexpr auto obfErrCrash = $o("CaptureLoop crashed: ");
     constexpr auto obfErrUnknown = $o("CaptureLoop crashed: Unknown error");
     constexpr auto obfQueryInterfaceTexture2D = $o("QueryInterface Texture2D");
@@ -141,18 +137,14 @@ void FrameCapturer::CaptureLoop() {
         ComPtr<IDXGIOutputDuplication> duplication;
 
         while (isCapturing_) {
-            if (frame_.empty()) {
-                continue; // Skip if not configured
-            }
-
             if (!keyWatcher_->IsCaptureKeyDown()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
 
             // Behavioral obfuscation: Reduced random delay
-            if (rand() % 100 < 10) { // 10% chance
-                std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 3)); // 0-2ms
+            if (rand() % 100 < 10) { // 17% chance
+                std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 2));
             }
 
             auto frameStart = std::chrono::steady_clock::now();
@@ -237,58 +229,64 @@ void FrameCapturer::CaptureLoop() {
                 continue;
             }
 
-            // VM block for frame data validation and copying
             uint8_t* src = (uint8_t*)mapped.pData;
-            cv::Mat temp(captureHeight_, captureWidth_, CV_8UC4);
-            uint8_t* dst = temp.data;
+            if (mapped.RowPitch < captureWidth_ * 4) {
+                std::cerr << "Invalid RowPitch: " << mapped.RowPitch
+                          << ", expected >= " << captureWidth_ * 4 << std::endl;
+                context_->Unmap(stagingTexture_.Get(), 0);
+                duplication->ReleaseFrame();
+                continue;
+            }
+
             bool allZero = true;
-            std::array<uint8_t, 3> bytecode_data = {
-                static_cast<uint8_t>(1 ^ key),
-                static_cast<uint8_t>(2 ^ key),
-                static_cast<uint8_t>(3 ^ key)
-            };
-            auto vm_block_data = [this, &temp, &allZero, src, dst, &mapped](uint8_t instr) {
-                if (instr == 1) {
-                    if (mapped.RowPitch == captureWidth_ * 4) {
-                        memcpy(dst, src, captureWidth_ * captureHeight_ * 4);
-                    } else {
-                        for (int i = 0; i < captureHeight_; ++i) {
-                            memcpy(dst + i * captureWidth_ * 4, src + i * mapped.RowPitch, captureWidth_ * 4);
-                        }
+            for (size_t y = 0; y < captureHeight_; ++y) {
+                for (size_t x = 0; x < captureWidth_ * 4; ++x) {
+                    size_t index = y * mapped.RowPitch + x;
+                    if (index >= captureHeight_ * mapped.RowPitch) {
+                        std::cerr << "Out-of-bounds access: index=" << index
+                                  << ", max=" << captureHeight_ * mapped.RowPitch << std::endl;
+                        context_->Unmap(stagingTexture_.Get(), 0);
+                        duplication->ReleaseFrame();
+                        continue;
+                    }
+                    if (src[index] != 0) {
+                        allZero = false;
+                        break;
                     }
                 }
-                if (instr == 2) {
-                    for (size_t i = 0; i < captureWidth_ * captureHeight_ * 4; ++i) {
-                        if (dst[i] != 0) {
-                            allZero = false;
-                            break;
-                        }
-                    }
-                }
-                if (instr == 3) {
-                    context_->Unmap(stagingTexture_.Get(), 0);
-                }
-            };
-            OBF_VM_FUNCTION_DYNAMIC(bytecode_data, key, vm_block_data);
+                if (!allZero) break;
+            }
 
             if (allZero) {
-                std::cerr << $d_inline(obfErrAllZero) << std::endl;
+                context_->Unmap(stagingTexture_.Get(), 0);
                 duplication->ReleaseFrame();
                 continue;
             }
 
-            temp.copyTo(frame_);
-            cv::ocl::finish();
-
-            if (frame_.empty()) {
-                std::cerr << $d_inline(obfErrEmptyFrame) << std::endl;
+            if (!src || captureWidth_ <= 0 || captureHeight_ <= 0 || mapped.RowPitch < captureWidth_ * 4) {
+                std::cerr << "Invalid frame parameters: src=" << (void*)src
+                          << ", width=" << captureWidth_ << ", height=" << captureHeight_
+                          << ", pitch=" << mapped.RowPitch << std::endl;
+                context_->Unmap(stagingTexture_.Get(), 0);
                 duplication->ReleaseFrame();
                 continue;
             }
 
-            // Obfuscate FrameSlot::StoreFrame call
+            Frame frame;
+            try {
+                frame = Frame(src, captureWidth_, captureHeight_, mapped.RowPitch, DXGI_FORMAT_B8G8R8A8_UNORM);
+            } catch (const std::exception& e) {
+                std::cerr << "Failed to create Frame: " << e.what() << std::endl;
+                context_->Unmap(stagingTexture_.Get(), 0);
+                duplication->ReleaseFrame();
+                continue;
+            }
+
             auto obfStoreFrame = $om(StoreFrame, FrameSlot, void);
-            $call(frameSlot_.get(), obfStoreFrame, frame_);
+            $call(frameSlot_.get(), obfStoreFrame, frame);
+
+            context_->Unmap(stagingTexture_.Get(), 0);
+            duplication->ReleaseFrame();
 
             auto frameEnd = std::chrono::steady_clock::now();
             auto frameDuration = std::chrono::duration_cast<std::chrono::microseconds>(frameEnd - frameStart).count();
@@ -310,8 +308,6 @@ void FrameCapturer::CaptureLoop() {
                 frameTimes.clear();
                 lastTime = currentTime;
             }
-
-            duplication->ReleaseFrame();
         }
     } catch (const std::exception& e) {
         std::cerr << $d_inline(obfErrCrash) << e.what() << std::endl;

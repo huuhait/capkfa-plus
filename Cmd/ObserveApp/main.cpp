@@ -21,6 +21,9 @@ int main() {
             di::bind<UINT>().to(0U), // Output index
             di::bind<FrameCapturer>().to<FrameCapturer>(),
             di::bind<Colorbot>().to<Colorbot>(),
+            di::bind<ObjectDetectionManager>().to<ObjectDetectionManager>(),
+            di::bind<YoloModel>().to<YoloModel>(),
+            di::bind<CudaModel>().to<CudaModel>(),
             di::bind<LogicManager>().to<LogicManager>(),
             di::bind<Km>().to<Km>(),
             di::bind<KeyWatcher>().to<KeyWatcher>()

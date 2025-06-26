@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(DXGICapture320Hz)
+project(CapkfaPlus)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 20)
@@ -14,6 +14,7 @@ else()
 endif()
 
 # Dependencies from vcpkg
+find_package(CUDA REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(boost_asio REQUIRED CONFIG)
 find_package(boost_system REQUIRED CONFIG)
@@ -24,6 +25,14 @@ find_package(OpenSSL REQUIRED)
 find_path(BEXT_DI_INCLUDE_DIRS "boost/di.hpp")
 
 find_program(PROTOC_EXECUTABLE protoc REQUIRED)
+
+# Find TensorRT (adjust paths for your TensorRT installation)
+find_library(TENSORRT_LIBRARY NAMES nvinfer_10 PATHS "C:/library/TensorRT/lib")
+find_path(TENSORRT_INCLUDE_DIR NAMES NvInfer.h PATHS "C:/library/TensorRT/include")
+
+if(NOT TENSORRT_LIBRARY OR NOT TENSORRT_INCLUDE_DIR)
+    message(FATAL_ERROR "TensorRT not found")
+endif()
 
 # Get gRPC plugin location
 get_target_property(grpc_cpp_plugin_location gRPC::grpc_cpp_plugin LOCATION)
@@ -55,33 +64,8 @@ set(CERT_FILES
         License/ca.crt
 )
 
-## Generate dummy obfuscated certs
-#add_custom_command(
-#        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
-#        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_dummies.py ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
-#        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_dummies.py
-#        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-#)
-#
-#add_custom_target(generate_dummies ALL
-#        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/obf_dummies.inl
-#)
-#
-## Generate fake logic block
-#add_custom_command(
-#        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
-#        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_fake_logic.py ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
-#        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Dummy/generate_fake_logic.py
-#        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-#)
-#
-#add_custom_target(generate_fake_logic ALL
-#        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/obf_fake_logic.inl
-#)
-
-
 # Add executable
-add_executable(DXGICapture
+add_executable(CapkfaPlus
         ${PROTO_SRCS}
         ${GRPC_SRCS}
         Cmd/ObserveApp/main.cpp
@@ -110,38 +94,59 @@ add_executable(DXGICapture
         HWID/HWIDTool.cpp
         HWID/HWIDTool.h
         License/Certificates.h
+        Logic/ObjectDetectionManager.cpp
+        Logic/ObjectDetectionManager.h
+        Logic/YoloModel.cpp
+        Logic/YoloModel.h
+        Logic/CudaModel.cpp
+        Logic/CudaModel.h
+        Frame/Frame.h
+)
+
+
+# Add executable
+add_executable(HWIDChecker
+        Cmd/HWIDChecker/main.cpp
+        HWID/HWIDTool.cpp
+        HWID/HWIDTool.h
 )
 
 # Link libraries
-target_link_libraries(DXGICapture PRIVATE
+target_link_libraries(CapkfaPlus PRIVATE
         d3d11
+        d3d12
         dxgi
         ws2_32
         mswsock
-        protobuf::libprotoc
         protobuf::libprotobuf
-        gRPC::grpc
         gRPC::grpc++
         ${OpenCV_LIBS}
         Boost::asio
         Boost::system
-        protobuf::libprotobuf
+        OpenSSL::SSL
         OpenSSL::Crypto
-        Advapi32
-        wbemuuid
-        Iphlpapi
-        Secur32
+        ${CUDA_LIBRARIES}
+        ${TENSORRT_LIBRARY}
+        "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-directml/lib/onnxruntime.lib"
 )
 
 # Include directories
-target_include_directories(DXGICapture PRIVATE
+target_include_directories(CapkfaPlus PRIVATE
         ${OpenCV_INCLUDE_DIRS}
         ${Boost_INCLUDE_DIRS}
         ${BEXT_DI_INCLUDE_DIRS}
         ${Protobuf_INCLUDE_DIRS}
+        ${OPENSSL_INCLUDE_DIR}
+        ${CUDA_INCLUDE_DIRS}
+        ${TENSORRT_INCLUDE_DIR}
         ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_CURRENT_BINARY_DIR}/proto
+        ${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-directml/include
 )
+
+target_link_libraries(HWIDChecker PRIVATE
+        OpenSSL::SSL
+        OpenSSL::Crypto)
 
 add_definitions(-DWIN32_LEAN_AND_MEAN)
 
