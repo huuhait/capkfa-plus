@@ -4,14 +4,20 @@
   "dependencies": [
     {
       "name": "opencv",
-      "features": ["highgui", "opencl", "dnn"]
+      "features": ["highgui", "opencl", "dnn", "directml"]
     },
     "boost-asio",
     "boost-system",
     "bext-di",
     "protobuf",
     "grpc",
-    "openssl",
-    "cuda"
+    "cuda",
+    "bzip2",
+    "libjpeg-turbo",
+    {
+      "name": "ffmpeg",
+      "features": ["all"]
+    },
+    "spdlog"
   ]
 }
