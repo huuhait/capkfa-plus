@@ -131,7 +131,7 @@ void LogicManager::ProcessLoop() {
 
                 HandleFlick(moveX, moveY);
 
-                if (remoteConfig_.mode() == ::capkfa::ObjectDetection && keyWatcher_->IsAimKeyDown()) {
+                if (remoteConfig_.mode() == ::capkfa::ObjectDetection) {
                     float boxCenterX = targetPoint.x;
                     float boxCenterY = targetPoint.y;
                     int cx = remoteConfig_.capture().size() / 2;
