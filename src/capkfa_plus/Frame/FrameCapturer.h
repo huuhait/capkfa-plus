@@ -18,7 +18,7 @@ using Microsoft::WRL::ComPtr;
 
 class FrameCapturer {
 public:
-    FrameCapturer(const DeviceManager& deviceManager, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot, std::shared_ptr<KeyWatcher> keyWatcher);
+    FrameCapturer(spdlog::logger& logger, const DeviceManager& deviceManager, UINT outputIndex, std::shared_ptr<FrameSlot> frameSlot, std::shared_ptr<KeyWatcher> keyWatcher);
     ~FrameCapturer();
     void StartCapture();
     void StopCapture();
@@ -28,6 +28,7 @@ private:
     void CaptureLoop();
     void CreateStagingTexture();
 
+    spdlog::logger& logger_;
     ComPtr<IDXGIOutput1> output1_;
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;

@@ -1,10 +1,3 @@
-# hi_fps_udp_mjpeg_preview.py
-#
-# - Receives MJPEG over UDP from OBS
-# - Uses ffmpeg pipe to decode MJPEG fast
-# - Displays latest frame only in another thread
-# - Shows FPS for both capture and display
-
 import cv2
 import numpy as np
 import subprocess
@@ -15,7 +8,7 @@ import sys
 
 # ------------------- CONFIG -------------------
 W, H = 256, 256  # image resolution (must match OBS)
-URI = 'udp://127.0.0.1:1234?fifo_size=5000000&overrun_nonfatal=1'
+URI = 'tcp://127.0.0.1:3100'  # Changed to TCP
 FFMPEG_BIN = 'ffmpeg'
 # ----------------------------------------------
 
@@ -24,7 +17,7 @@ cmd = [
     '-loglevel', 'quiet',
     '-i', URI,
     '-f', 'rawvideo',
-    '-pix_fmt', 'bgr24',
+    '-pix_fmt', 'bgr24',  # Keep using BGR for OpenCV
     '-'
 ]
 
@@ -84,13 +77,11 @@ while running:
 
     frame = np.frombuffer(buf, dtype=np.uint8).reshape((H, W, 3))
 
-    # 🔍 Debug: check that the frame is 3-channel RGB
     if frame.shape != (H, W, 3) or frame.dtype != np.uint8:
         print(f"⚠️ Unexpected frame shape: {frame.shape}, dtype: {frame.dtype}")
     else:
-        # Optional: check a few pixel values
         b, g, r = frame[0, 0]
-        print(f"🟢 RGB sample at (0,0): R={r}, G={g}, B={b}")
+        # print(f"🟢 BGR sample at (0,0): B={b}, G={g}, R={r}")
 
     with lock:
         last_frame = frame

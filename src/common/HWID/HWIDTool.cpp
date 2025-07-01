@@ -26,10 +26,9 @@ std::string HWIDTool::GetHWID() {
     std::string uuid = GetWmiValue(L"Win32_ComputerSystemProduct", L"UUID");
     std::string biosSerial = GetWmiValue(L"Win32_BIOS", L"SerialNumber");
     std::string macs = GetAllMacs();
-    std::string sid = GetCurrentUserSid();
     std::string gpuUuid = GetNvidiaGpuUuid();
     std::string diskSerials = GetAllDiskSerials();
-    std::string raw = uuid + biosSerial + macs + sid + gpuUuid + diskSerials;
+    std::string raw = uuid + biosSerial + macs + gpuUuid + diskSerials;
     std::string hwid = ComputeSha256(raw);
     return hwid;
 }
@@ -141,31 +140,6 @@ std::string HWIDTool::GetAllMacs() {
     std::string result;
     for (const auto& m : macs) result += m;
     return result;
-}
-
-std::string HWIDTool::GetCurrentUserSid() {
-    HANDLE hToken;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) return "";
-    DWORD dwSize = 0;
-    GetTokenInformation(hToken, TokenUser, NULL, 0, &dwSize);
-    std::vector<BYTE> buffer(dwSize);
-    PTOKEN_USER pTokenUser = (PTOKEN_USER)buffer.data();
-    if (GetTokenInformation(hToken, TokenUser, pTokenUser, dwSize, &dwSize)) {
-        LPWSTR sidString = NULL;
-        if (ConvertSidToStringSidW(pTokenUser->User.Sid, &sidString)) {
-            std::wstring ws(sidString);
-            LocalFree(sidString);
-            CloseHandle(hToken);
-            // Convert wstring to string using WideCharToMultiByte
-            int size = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, NULL, 0, NULL, NULL);
-            if (size == 0) return "";
-            std::vector<char> narrow(size);
-            WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, narrow.data(), size, NULL, NULL);
-            return std::string(narrow.data());
-        }
-    }
-    CloseHandle(hToken);
-    return "";
 }
 
 std::string HWIDTool::GetNvidiaGpuUuid() {

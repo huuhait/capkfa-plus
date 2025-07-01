@@ -14,10 +14,7 @@
     "cuda",
     "bzip2",
     "libjpeg-turbo",
-    {
-      "name": "ffmpeg",
-      "features": ["all"]
-    },
+    "ffmpeg",
     "spdlog"
   ]
 }

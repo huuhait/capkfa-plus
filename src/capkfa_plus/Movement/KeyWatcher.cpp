@@ -29,7 +29,7 @@ uint8_t KeyWatcher::GetKey(const std::string& key) {
     return 0;
 }
 
-bool KeyWatcher::IsAimKeuDown() {
+bool KeyWatcher::IsAimKeyDown() {
     uint8_t key = GetKey(config_.aim().aim().key());
 
     if (key == 0) {
@@ -54,12 +54,9 @@ bool KeyWatcher::IsShotKeyDown() {
 }
 
 bool KeyWatcher::IsCaptureKeyDown() {
-    return IsAimKeuDown() || IsFlickKeyDown();
+    return IsAimKeyDown() || IsFlickKeyDown();
 }
 
 bool KeyWatcher::IsHandlerKeyDown() {
-    return IsAimKeuDown() || IsFlickKeyDown();
+    return IsAimKeyDown() || IsFlickKeyDown();
 }
-
-
-

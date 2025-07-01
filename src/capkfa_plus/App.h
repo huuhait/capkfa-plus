@@ -16,7 +16,7 @@ public:
         std::unique_ptr<LicenseClient> licenseClient,
         std::shared_ptr<CommanderClient> commanderClient,
         std::shared_ptr<KeyWatcher> keyWatcher,
-        // std::unique_ptr<FrameCapturer> frameCapturer,
+        std::unique_ptr<FrameCapturer> frameCapturer,
         std::unique_ptr<FrameGrabber> frameGrabber,
         std::shared_ptr<LogicManager> logicManager);
     ~App() = default;
@@ -30,20 +30,29 @@ private:
     void StartConfigStream();
     void StopConfigStream();
     void ProcessConfigStreaming();
+    void StartPingLoop();
+    void StopPingLoop();
+    void ProcessPingLoop();
 
     spdlog::logger& logger_;
     std::unique_ptr<LicenseClient> licenseClient_;
     std::shared_ptr<CommanderClient> commanderClient_;
     std::shared_ptr<KeyWatcher> keyWatcher_;
-    // std::unique_ptr<FrameCapturer> frameCapturer_;
+    std::unique_ptr<FrameCapturer> frameCapturer_;
     std::unique_ptr<FrameGrabber> frameGrabber_;
     std::shared_ptr<LogicManager> logicManager_;
 
     std::string key_;
     std::string hwid_;
+    std::string session_id_;
 
     std::thread streamConfigThread_;
     std::atomic<bool> isStreamingConfig_;
+
+    std::thread licensePingThread_;
+    std::atomic<bool> isPingingLicense_;
+
+    std::string version_ = "2.0.1";
 };
 
 #endif // APP_H

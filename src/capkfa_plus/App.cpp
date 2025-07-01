@@ -14,39 +14,39 @@ App::App(spdlog::logger& logger,
         std::unique_ptr<LicenseClient> client,
         std::shared_ptr<CommanderClient> commanderClient,
         std::shared_ptr<KeyWatcher> keyWatcher,
-        // std::unique_ptr<FrameCapturer> frameCapturer,
+        std::unique_ptr<FrameCapturer> frameCapturer,
         std::unique_ptr<FrameGrabber> frameGrabber,
         std::shared_ptr<LogicManager> logicManager)
     : logger_(logger),
       licenseClient_(std::move(client)),
       commanderClient_(commanderClient),
       keyWatcher_(keyWatcher),
-      // frameCapturer_(std::move(frameCapturer)),
+      frameCapturer_(std::move(frameCapturer)),
       frameGrabber_(std::move(frameGrabber)),
       logicManager_(logicManager) {}
 
 bool App::Start() {
     cv::ocl::setUseOpenCL(true);
 
-    constexpr auto obfLockedHwid = $o("16F24F4AE3D7102990E9CF9AFA65E3B33952A6CD8D04E29221B73EE519A99109");
+    constexpr auto obfLockedHwid = $o("2F1951879D072385177FD830572A42C80A7BFEE2ADA7FE045D4025EF5BB8DA22");
     constexpr auto obfDevKey = $o("MIKU-BC76F17DC89C8F8881EA83822C2FCA54");
     auto obfGetHWID = $of(HWIDTool::GetHWID);
     std:: string computerHWID = obfGetHWID();
 
     hwid_ = $d_inline(obfLockedHwid);
 
-    // if (computerHWID != hwid_) {
-    //     std::cerr << "HWID is not to the generated locked HWID Loader" << std::endl;
-    //     return false;
-    // }
+    if (computerHWID != hwid_) {
+       logger_.error("HWID mismatch {} != {}", computerHWID, hwid_);
+       return false;
+    }
 
-    // std::cout << "Enter your key: ";
-    // std::getline(std::cin, key_);
+    std::cout << "Enter your key: ";
+    std::getline(std::cin, key_);
 
     // DEV BLOCK
-    // if (key_.empty()) {
+    if (key_.empty()) {
         key_ = $d_inline(obfDevKey);
-    // }
+    }
     // DEV BLOCK
 
     try {
@@ -63,12 +63,14 @@ bool App::Start() {
             return false;
         }
 
-        logger_.info("Session ID: {}", create_session_response.session_id());
+        session_id_ = create_session_response.session_id();
 
-        frameGrabber_->Start();
+        logger_.info("Session ID: {}", session_id_);
 
         auto obfStartConfigStreamFunc = $om(StartConfigStream, App, void);
         $call(this, obfStartConfigStreamFunc);
+        auto obfStartPingLoopFunc = $om(StartPingLoop, App, void);
+        $call(this, obfStartPingLoopFunc);
         return true;
     } catch (const std::exception& e) {
         logger_.error("Start failed {}", e.what());
@@ -78,24 +80,23 @@ bool App::Start() {
 
 void App::Stop() {
     try {
-        constexpr uint8_t bytecode[] = {1, 2, 3};
+        constexpr uint8_t bytecode[] = {1, 2, 3, 4};
         OBF_VM_FUNCTION(bytecode, [this](uint8_t instr) {
             switch (instr) {
                 VM_CASE(1) {
-                    // if (frameCapturer_) {
-                    //     frameCapturer_->StopCapture();
-                    // }
-                    if (frameGrabber_)
-                    {
-                        frameGrabber_->Stop();
-                    }
+                    frameCapturer_->StopCapture();
+                    frameGrabber_->Stop();
                 }
                 VM_CASE(2) {
                     if (logicManager_) {
                         logicManager_->Stop();
                     }
                 }
-                VM_CASE(3) {
+                VM_CASE(3)
+                {
+                    StopPingLoop();
+                }
+                VM_CASE(4) {
                     StopConfigStream();
                 }
             }
@@ -108,6 +109,11 @@ void App::Stop() {
 bool App::CheckServerStatus() {
     try {
         capkfa::GetStatusResponse status_response = licenseClient_->GetStatus();
+
+        if (status_response.version() != version_) {
+            logger_.error("Version mismatch: {}", status_response.version());
+            return false;
+        }
 
         return status_response.online();
     } catch (const std::exception& e) {
@@ -122,7 +128,7 @@ bool App::CheckServerStatus() {
         ::capkfa::CreateSessionRequest request;
         request.set_key(key);
         request.set_hwid(hwid);
-        request.set_version("1.0.0");
+        request.set_version(version_);
         return licenseClient_->CreateSession(request);
     } catch (const std::exception& e) {
         logger_.error("Session creation failed: {}", e.what());
@@ -146,6 +152,22 @@ void App::StopConfigStream() {
     }
 }
 
+void App::StartPingLoop() {
+    if (!isPingingLicense_) {
+        isPingingLicense_ = true;
+        licensePingThread_ = std::thread(&App::ProcessPingLoop, this);
+    }
+}
+
+void App::StopPingLoop() {
+    if (isPingingLicense_) {
+        isPingingLicense_ = false;
+        if (licensePingThread_.joinable()) {
+            licensePingThread_.join();
+        }
+    }
+}
+
 void App::ProcessConfigStreaming() {
     ::capkfa::GetConfigRequest request;
     request.set_key(key_);
@@ -160,18 +182,21 @@ void App::ProcessConfigStreaming() {
             switch (instr) {
                 VM_CASE(1)
                 {
-                    if (frameGrabber_)
-                    {
+                    frameGrabber_->Stop();
+                    frameCapturer_->StopCapture();
+                    if (response.remote_config().capture().mode().type() == ::capkfa::RemoteConfigCaptureMode_CaptureModeType_NDI) {
                         frameGrabber_->SetConfig(response.remote_config());
+                    } else {
+                        frameCapturer_->SetConfig(response.remote_config());
                     }
                 }
                 VM_CASE(2) {
-                    if (logicManager_) logicManager_->SetConfig(response.remote_config());
+                    if (keyWatcher_)
+                    {
+                        keyWatcher_->SetConfig(response.remote_config());
+                    }
                 }
                 VM_CASE(3) {
-                    if (keyWatcher_) keyWatcher_->SetConfig(response.remote_config());
-                }
-                VM_CASE(4) {
                     if (!started && commanderClient_) {
                         commanderClient_->SetConfig(response.remote_config());
                         started = true;
@@ -180,7 +205,36 @@ void App::ProcessConfigStreaming() {
             }
         };
         OBF_VM_FUNCTION(bytecode, vm_block);
+
+        logicManager_->SetConfig(response.remote_config());
     }
 
     reader.Finish();
+}
+
+void App::ProcessPingLoop()
+{
+    return;
+
+    while (isPingingLicense_)
+    {
+        try
+        {
+            ::capkfa::PingRequest request;
+            request.set_key(key_);
+            request.set_hwid(hwid_);
+            request.set_session_id(session_id_);
+            request.set_version(version_);
+            auto response = licenseClient_->Ping(request);
+            logger_.info("Ping license response: {}", response.valid());
+            if (!response.valid())
+            {
+                throw std::runtime_error("Ping response failed (gonna session killed)");
+            }
+        } catch (const std::exception& e)
+        {
+            logger_.error("Ping failed: {}", e.what());
+            Stop();
+        }
+    }
 }

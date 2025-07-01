@@ -24,10 +24,8 @@ int main() {
             di::bind<LicenseClient>().to<LicenseClient>(),
             di::bind<DeviceManager>().to<DeviceManager>(),
             di::bind<UINT>().to(0U), // Output index
-            // di::bind<FrameCapturer>().to<FrameCapturer>(),
+            di::bind<FrameCapturer>().to<FrameCapturer>(),
             di::bind<FrameGrabber>().to<FrameGrabber>(),
-            di::bind<PixelSeek>().to<PixelSeek>(),
-            di::bind<ObjectDetectionManager>().to<ObjectDetectionManager>(),
             di::bind<YoloModel>().to<YoloModel>(),
             di::bind<CudaModel>().to<CudaModel>(),
             di::bind<LogicManager>().to<LogicManager>(),

@@ -1,21 +1,19 @@
 #ifndef FRAME_SLOT_H
 #define FRAME_SLOT_H
 
-#include "Frame.h"
-#include <mutex>
-#include <cstdint>
 #include <memory>
+#include <atomic>
+#include "Frame.h"
 
 class FrameSlot {
 public:
-    FrameSlot() : frameVersion_(0) {}
+    FrameSlot() = default;
     void StoreFrame(std::shared_ptr<Frame> frame);
     std::pair<std::shared_ptr<Frame>, uint64_t> GetFrame(uint64_t lastVersion) const;
 
 private:
-    std::shared_ptr<Frame> frame_;
-    uint64_t frameVersion_;
-    mutable std::mutex mutex_;
+    std::atomic<std::shared_ptr<Frame>> frame_{nullptr};
+    std::atomic<uint64_t> frame_version_{0};
 };
 
-#endif
+#endif // FRAME_SLOT_H

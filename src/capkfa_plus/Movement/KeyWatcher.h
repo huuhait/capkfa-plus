@@ -12,7 +12,7 @@ public:
     void SetConfig(const ::capkfa::RemoteConfig& config);
     bool IsCaptureKeyDown();
     bool IsHandlerKeyDown();
-    bool IsAimKeuDown();
+    bool IsAimKeyDown();
     bool IsFlickKeyDown();
     bool IsShotKeyDown();
 private:

@@ -157,24 +157,21 @@ std::vector<Detection> YoloModel::extractDetections(const std::vector<float>& ra
 std::vector<Detection> YoloModel::Predict(std::shared_ptr<Frame>& frame) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
+    std::vector<double> durations;
 
     auto record_time = [&](const std::string& step, const auto& start) {
         auto end = high_resolution_clock::now();
-        auto duration = duration_cast<microseconds>(end - start).count() / 1000.0;
+        durations.push_back(duration_cast<microseconds>(end - start).count() / 1000.0);
         return end;
     };
 
     cv::Mat blob_fp16 = preprocessFrame(frame);
     auto t1 = record_time("Preprocess Frame", t_start);
-    if (blob_fp16.empty()) {
-        return {};
-    }
+    if (blob_fp16.empty()) return {};
 
     Ort::Value input_tensor = createInputTensor(blob_fp16);
     auto t2 = record_time("Create Input Tensor", t1);
-    if (!input_tensor) {
-        return {};
-    }
+    if (!input_tensor) return {};
 
     const char* input_names[] = {"images"};
     const char* output_names[] = {"output0"};
@@ -188,9 +185,7 @@ std::vector<Detection> YoloModel::Predict(std::shared_ptr<Frame>& frame) {
 
     std::vector<float> raw_float = processOutputTensor(output_tensors);
     auto t4 = record_time("Process Output Tensor", t3);
-    if (raw_float.empty()) {
-        return {};
-    }
+    if (raw_float.empty()) return {};
 
     std::vector<Detection> detections = extractDetections(raw_float);
     auto t5 = record_time("Extract Detections", t4);
@@ -200,19 +195,11 @@ std::vector<Detection> YoloModel::Predict(std::shared_ptr<Frame>& frame) {
 
     std::vector<Detection> final;
     final.reserve(keep.size());
-    for (int idx : keep) {
-        final.push_back(detections[idx]);
-    }
+    for (int idx : keep) final.push_back(detections[idx]);
 
     auto total_duration = duration_cast<microseconds>(high_resolution_clock::now() - t_start).count() / 1000.0;
-    /*logger_.debug("YoloModel Predict: Preprocess: {:.2f}ms, Input Tensor: {:.2f}ms, Inference: {:.2f}ms, "
-                  "Process Output: {:.2f}ms, Extract Detections: {:.2f}ms, NMS: {:.2f}ms, Total: {:.2f}ms",
-                  t1.time_since_epoch().count() / 1000.0,
-                  t2.time_since_epoch().count() / 1000.0,
-                  t3.time_since_epoch().count() / 1000.0,
-                  t4.time_since_epoch().count() / 1000.0,
-                  t5.time_since_epoch().count() / 1000.0,
-                  t6.time_since_epoch().count() / 1000.0,
-                  total_duration);*/
+    /*logger_.debug("YoloModel Predict: Preprocess: {:.2f}ms, Input Tensor: {:.2f}ms, Inference: {:.2f}ms, Process Output: {:.2f}ms, Extract Detections: {:.2f}ms, NMS: {:.2f}ms, Total: {:.2f}ms",
+                  durations[0], durations[1], durations[2], durations[3], durations[4], durations[5], total_duration);*/
+
     return final;
 }

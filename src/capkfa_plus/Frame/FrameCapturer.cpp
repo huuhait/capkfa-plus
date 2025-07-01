@@ -13,9 +13,9 @@
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "comsuppw.lib")
 
-FrameCapturer::FrameCapturer(const DeviceManager& deviceManager, UINT outputIndex,
+FrameCapturer::FrameCapturer(spdlog::logger& logger, const DeviceManager& deviceManager, UINT outputIndex,
                              std::shared_ptr<FrameSlot> frameSlot, std::shared_ptr<KeyWatcher> keyWatcher)
-    : output1_(deviceManager.GetOutput()), device_(deviceManager.GetDevice()),
+    : logger_(logger), output1_(deviceManager.GetOutput()), device_(deviceManager.GetDevice()),
       context_(deviceManager.GetContext()), outputIndex_(outputIndex), frameSlot_(frameSlot),
       keyWatcher_(keyWatcher), isCapturing_(false), captureWidth_(0), captureHeight_(0),
       offsetX_(0), offsetY_(0), refreshRate_(0), timeoutMs_(0) {}
@@ -38,8 +38,8 @@ void FrameCapturer::CreateStagingTexture() {
 }
 
 void FrameCapturer::SetConfig(const ::capkfa::RemoteConfig& config) {
-    int width = config.aim().fov();
-    int height = config.aim().fov();
+    int width = config.capture().size();
+    int height = config.capture().size();
 
     if (width <= 0 || height <= 0) {
         throw std::runtime_error("Invalid capture size: " + std::to_string(width) + "x" + std::to_string(height));
@@ -69,9 +69,8 @@ void FrameCapturer::SetConfig(const ::capkfa::RemoteConfig& config) {
     stagingTexture_.Reset();
     CreateStagingTexture();
 
-    std::cout << "Capture config set: size " << captureWidth_ << "x" << captureHeight_
-              << ", centered offset (" << offsetX_ << "," << offsetY_ << "), "
-              << refreshRate_ << "Hz, timeout " << timeoutMs_ << "ms" << std::endl;
+    logger_.info("Capture config set: size {}x{}, centered offset ({}, {}), {}Hz, timeout {}ms",
+                 captureWidth_, captureHeight_, offsetX_, offsetY_, refreshRate_, timeoutMs_);
 
     StartCapture();
 }
@@ -115,10 +114,6 @@ void FrameCapturer::CaptureLoop() {
         ComPtr<IDXGIOutputDuplication> duplication;
 
         while (isCapturing_) {
-            if (!keyWatcher_->IsCaptureKeyDown()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(3));
-            }
-
             auto frameStart = std::chrono::steady_clock::now();
 
             // VM block for DXGI operations
@@ -248,7 +243,7 @@ void FrameCapturer::CaptureLoop() {
                 cv::Mat temp(captureHeight_, captureWidth_, CV_8UC4, mapped.pData, mapped.RowPitch);
                 temp.copyTo(bgra);
                 cv::UMat rgb;
-                cv::cvtColor(bgra, rgb, cv::COLOR_BGRA2RGB);
+                cv::cvtColor(bgra, rgb, cv::COLOR_BGRA2BGR);
                 auto frame = std::make_shared<Frame>(rgb, captureWidth_, captureHeight_);
                 $call(frameSlot_.get(), $om(StoreFrame, FrameSlot, void), frame);
             } catch (const std::exception& e) {
@@ -276,17 +271,17 @@ void FrameCapturer::CaptureLoop() {
                 float variance = 0.0f;
                 for (float t : frameTimes) variance += (t - mean) * (t - mean);
                 variance /= frameTimes.size();
-                std::cout << "Output " << outputIndex_ << " FPS: " << fps << ", Frame Time Variance: " << variance << "ms^2" << std::endl;
+                logger_.info("FrameCapturer FPS: {:.2f}, Frame Time Variance: {:.2f}ms", fps, variance);
                 frameCount = 0;
                 frameTimes.clear();
                 lastTime = currentTime;
             }
         }
     } catch (const std::exception& e) {
-        std::cerr << $d_inline(obfErrCrash) << e.what() << std::endl;
+        logger_.error("{} {}", $d_inline(obfErrCrash), e.what());
         isCapturing_ = false;
     } catch (...) {
-        std::cerr << $d_inline(obfErrUnknown) << std::endl;
+        logger_.error($d_inline(obfErrUnknown));
         isCapturing_ = false;
     }
 }

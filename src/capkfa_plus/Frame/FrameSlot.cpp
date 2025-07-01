@@ -1,15 +1,15 @@
 #include "FrameSlot.h"
 
 void FrameSlot::StoreFrame(std::shared_ptr<Frame> frame) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    frame_ = frame;
-    frameVersion_++;
+    frame_.store(frame, std::memory_order_release);
+    frame_version_.fetch_add(1, std::memory_order_release);
 }
 
 std::pair<std::shared_ptr<Frame>, uint64_t> FrameSlot::GetFrame(uint64_t lastVersion) const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (lastVersion < frameVersion_ && frame_ && frame_->IsValid()) {
-        return {frame_, frameVersion_};
+    auto current_frame = frame_.load(std::memory_order_acquire);
+    auto current_version = frame_version_.load(std::memory_order_acquire);
+    if (lastVersion < current_version && current_frame && current_frame->IsValid()) {
+        return {current_frame, current_version};
     }
-    return {nullptr, frameVersion_};
+    return {nullptr, current_version};
 }

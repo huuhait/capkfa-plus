@@ -19,8 +19,6 @@ add_executable(CapkfaPlus
         Frame/DeviceManager.h
         License/LicenseClient.cpp
         License/LicenseClient.h
-        Logic/PixelSeek.cpp
-        Logic/PixelSeek.h
         Logic/LogicManager.cpp
         Logic/LogicManager.h
         Movement/CommanderClient.cpp
@@ -30,8 +28,6 @@ add_executable(CapkfaPlus
         Movement/Km.cpp
         Movement/Km.h
         License/Certificates.h
-        Logic/ObjectDetectionManager.cpp
-        Logic/ObjectDetectionManager.h
         Logic/YoloModel.cpp
         Logic/YoloModel.h
         Logic/CudaModel.cpp
@@ -61,6 +57,7 @@ target_link_libraries(CapkfaPlus PRIVATE
         ${CUDA_LIBRARIES}
         ${TENSORRT_LIBRARY}
         ${FFMPEG_LIBRARIES}
+        ${NDI_LIBRARY}
         $<IF:$<TARGET_EXISTS:libjpeg-turbo::turbojpeg>,libjpeg-turbo::turbojpeg,libjpeg-turbo::turbojpeg-static>
         "C:/library/ONNX/lib/onnxruntime.lib"
 )
@@ -75,6 +72,7 @@ target_include_directories(CapkfaPlus PRIVATE
         ${CUDA_INCLUDE_DIRS}
         ${FFMPEG_INCLUDE_DIRS}
         ${TENSORRT_INCLUDE_DIR}
+        ${NDI_INCLUDE_DIR}
         "C:/library/ONNX/include"
         ${CMAKE_BINARY_DIR}
         ${CMAKE_BINARY_DIR}/proto

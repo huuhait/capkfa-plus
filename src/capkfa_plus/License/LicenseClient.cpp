@@ -61,16 +61,6 @@ LicenseClient::LicenseClient() {
     return response;
 }
 
-::capkfa::KillAllSessionsResponse LicenseClient::KillAllSessions(const ::capkfa::KillAllSessionsRequest& request) {
-    ::capkfa::KillAllSessionsResponse response;
-    grpc::ClientContext context;
-    grpc::Status status = stub_->KillAllSessions(&context, request, &response);
-    if (!status.ok()) {
-        throw std::runtime_error("KillAllSessions failed: " + status.error_message());
-    }
-    return response;
-}
-
 ::capkfa::PingResponse LicenseClient::Ping(const ::capkfa::PingRequest& request) {
     ::capkfa::PingResponse response;
     grpc::ClientContext context;
