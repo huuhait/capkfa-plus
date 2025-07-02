@@ -33,8 +33,10 @@ add_executable(CapkfaPlus
         Logic/CudaModel.cpp
         Logic/CudaModel.h
         Frame/Frame.h
-        Frame/FrameGrabber.cpp
-        Frame/FrameGrabber.h
+        Frame/NDICapturer.cpp
+        Frame/NDICapturer.h
+        Frame/MoonlightCapturer.cpp
+        Frame/MoonlightCapturer.h
 )
 
 add_dependencies(CapkfaPlus CapkfaPlus_proto)

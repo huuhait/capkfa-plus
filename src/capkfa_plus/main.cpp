@@ -5,7 +5,7 @@
 #include <spdlog/spdlog.h>
 
 #include "Obfuscate.h"
-#include "Frame/FrameGrabber.h"
+#include "Frame/NDICapturer.h"
 #include "Movement/CommanderClient.h"
 #include "Movement/KeyWatcher.h"
 #include "Movement/Km.h"
@@ -25,7 +25,7 @@ int main() {
             di::bind<DeviceManager>().to<DeviceManager>(),
             di::bind<UINT>().to(0U), // Output index
             di::bind<FrameCapturer>().to<FrameCapturer>(),
-            di::bind<FrameGrabber>().to<FrameGrabber>(),
+            di::bind<NDICapturer>().to<NDICapturer>(),
             di::bind<YoloModel>().to<YoloModel>(),
             di::bind<CudaModel>().to<CudaModel>(),
             di::bind<LogicManager>().to<LogicManager>(),

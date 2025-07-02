@@ -5,7 +5,7 @@
 #include "Frame/FrameCapturer.h"
 #include "Logic/LogicManager.h"
 #include "Movement/CommanderClient.h"
-#include "Frame/FrameGrabber.h"
+#include "Frame/NDICapturer.h"
 #include <memory>
 #include <string>
 #include <spdlog/logger.h>
@@ -17,7 +17,7 @@ public:
         std::shared_ptr<CommanderClient> commanderClient,
         std::shared_ptr<KeyWatcher> keyWatcher,
         std::unique_ptr<FrameCapturer> frameCapturer,
-        std::unique_ptr<FrameGrabber> frameGrabber,
+        std::unique_ptr<NDICapturer> ndiCapturer,
         std::shared_ptr<LogicManager> logicManager);
     ~App() = default;
 
@@ -39,7 +39,7 @@ private:
     std::shared_ptr<CommanderClient> commanderClient_;
     std::shared_ptr<KeyWatcher> keyWatcher_;
     std::unique_ptr<FrameCapturer> frameCapturer_;
-    std::unique_ptr<FrameGrabber> frameGrabber_;
+    std::unique_ptr<NDICapturer> ndiCapturer_;
     std::shared_ptr<LogicManager> logicManager_;
 
     std::string key_;

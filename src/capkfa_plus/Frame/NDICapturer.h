@@ -11,10 +11,10 @@
 #include "Frame.h"
 #include "FrameSlot.h" // Assumed to define FrameSlot class
 
-class NDICapture {
+class NDICapturer {
 public:
-    NDICapture(spdlog::logger& logger, std::shared_ptr<FrameSlot> frameSlot);
-    ~NDICapture();
+    NDICapturer(spdlog::logger& logger, std::shared_ptr<FrameSlot> frameSlot);
+    ~NDICapturer();
 
     void Start();
     void Stop();

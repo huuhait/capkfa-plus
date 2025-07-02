@@ -7,7 +7,7 @@
 #include "HWIDTool.h"
 #include "Logic/LogicManager.h"
 #include "Frame/FrameCapturer.h"
-#include "Frame/FrameGrabber.h"
+#include "Frame/NDICapturer.h"
 #include "Movement/CommanderClient.h"
 
 App::App(spdlog::logger& logger,
@@ -15,20 +15,20 @@ App::App(spdlog::logger& logger,
         std::shared_ptr<CommanderClient> commanderClient,
         std::shared_ptr<KeyWatcher> keyWatcher,
         std::unique_ptr<FrameCapturer> frameCapturer,
-        std::unique_ptr<FrameGrabber> frameGrabber,
+        std::unique_ptr<NDICapturer> ndiCapturer,
         std::shared_ptr<LogicManager> logicManager)
     : logger_(logger),
       licenseClient_(std::move(client)),
       commanderClient_(commanderClient),
       keyWatcher_(keyWatcher),
       frameCapturer_(std::move(frameCapturer)),
-      frameGrabber_(std::move(frameGrabber)),
+      ndiCapturer_(std::move(ndiCapturer)),
       logicManager_(logicManager) {}
 
 bool App::Start() {
     cv::ocl::setUseOpenCL(true);
 
-    constexpr auto obfLockedHwid = $o("2F1951879D072385177FD830572A42C80A7BFEE2ADA7FE045D4025EF5BB8DA22");
+    constexpr auto obfLockedHwid = $o("DC50AE1D1B673FFCF1F032DF0D1BF0B1ABE908EBB06C26000F64F2721CB8DABF");
     constexpr auto obfDevKey = $o("MIKU-BC76F17DC89C8F8881EA83822C2FCA54");
     auto obfGetHWID = $of(HWIDTool::GetHWID);
     std:: string computerHWID = obfGetHWID();
@@ -85,7 +85,7 @@ void App::Stop() {
             switch (instr) {
                 VM_CASE(1) {
                     frameCapturer_->StopCapture();
-                    frameGrabber_->Stop();
+                    ndiCapturer_->Stop();
                 }
                 VM_CASE(2) {
                     if (logicManager_) {
@@ -182,10 +182,10 @@ void App::ProcessConfigStreaming() {
             switch (instr) {
                 VM_CASE(1)
                 {
-                    frameGrabber_->Stop();
+                    ndiCapturer_->Stop();
                     frameCapturer_->StopCapture();
                     if (response.remote_config().capture().mode().type() == ::capkfa::RemoteConfigCaptureMode_CaptureModeType_NDI) {
-                        frameGrabber_->SetConfig(response.remote_config());
+                        ndiCapturer_->SetConfig(response.remote_config());
                     } else {
                         frameCapturer_->SetConfig(response.remote_config());
                     }

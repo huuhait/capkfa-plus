@@ -64,8 +64,6 @@ int main()
     }
     if (g_exit || source_count == 0) {
         std::cerr << "No NDI sources found." << std::endl;
-        NDIlib_find_destroy(finder);
-        NDIlib_destroy();
         return EXIT_FAILURE;
     }
 
@@ -73,27 +71,19 @@ int main()
     for (uint32_t i = 0; i < source_count; ++i)
         std::cout << "  [" << i << "] " << sources[i].p_ndi_name << "\n";
 
-    // Automatically select source with IP 192.168.44.121
     int sel = -1;
-    std::string target_ip = "192.168.44.121";
-    for (uint32_t i = 0; i < source_count; ++i) {
-        std::string source_name(sources[i].p_ndi_name);
-        std::string source_ip(sources[i].p_url_address ? sources[i].p_url_address : "");
-        if (source_name.find(target_ip) != std::string::npos || source_ip.find(target_ip) != std::string::npos) {
-            sel = i;
-            break;
+    while (sel < 0 || sel >= static_cast<int>(source_count)) {
+        std::cout << "Select source index (0-" << (source_count - 1) << "): ";
+        std::cin >> sel;
+        if (std::cin.fail() || sel < 0 || sel >= static_cast<int>(source_count)) {
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            sel = -1;
         }
     }
 
-    if (sel == -1) {
-        std::cerr << "ERROR: Source with IP 192.168.44.121 not found." << std::endl;
-        NDIlib_find_destroy(finder);
-        NDIlib_destroy();
-        return EXIT_FAILURE;
-    }
-
     const NDIlib_source_t* chosen = &sources[sel];
-    std::cout << "Connecting to: " << chosen->p_ndi_name << " (" << (chosen->p_url_address ? chosen->p_url_address : "no IP") << ")" << std::endl;
+    std::cout << "Connecting to: " << chosen->p_ndi_name << std::endl;
 
     NDIlib_recv_create_v3_t recv_desc{};
     recv_desc.source_to_connect_to = *chosen;
@@ -104,8 +94,6 @@ int main()
     NDIlib_recv_instance_t receiver = NDIlib_recv_create_v3(&recv_desc);
     if (!receiver) {
         std::cerr << "ERROR: Unable to create NDI receiver." << std::endl;
-        NDIlib_find_destroy(finder);
-        NDIlib_destroy();
         return EXIT_FAILURE;
     }
 
