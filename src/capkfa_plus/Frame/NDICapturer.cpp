@@ -8,17 +8,17 @@
 #pragma comment(lib, "Processing.NDI.Lib.x64.lib")
 #endif
 
-FrameGrabber::FrameGrabber(spdlog::logger& logger, std::shared_ptr<FrameSlot> frameSlot)
+NDICapture::NDICapture(spdlog::logger& logger, std::shared_ptr<FrameSlot> frameSlot)
     : logger_(logger), receiver_(nullptr), finder_(nullptr), running_(true),
       frame_count_(0), total_decode_time_(0), frame_slot_(frameSlot),
       start_time_(std::chrono::steady_clock::now()),
       last_fps_time_(start_time_), last_frame_time_(start_time_) {}
 
-FrameGrabber::~FrameGrabber() {
+NDICapture::~NDICapture() {
     Stop();
 }
 
-void FrameGrabber::Stop() {
+void NDICapture::Stop() {
     running_ = false;
 
     // Clean up NDI resources
@@ -53,7 +53,7 @@ void FrameGrabber::Stop() {
     logger_.info("FrameGrabber stopped");
 }
 
-void FrameGrabber::Start() {
+void NDICapture::Start() {
     if (remote_config_.capture().size() <= 0) {
         logger_.error("Cannot start: Invalid capture size {}", remote_config_.capture().size());
         throw std::runtime_error("Invalid capture size");
@@ -99,14 +99,14 @@ void FrameGrabber::Start() {
     }
 }
 
-void FrameGrabber::SetConfig(const ::capkfa::RemoteConfig& config) {
+void NDICapture::SetConfig(const ::capkfa::RemoteConfig& config) {
     logger_.info("Setting new config for FrameGrabber");
     Stop();
     remote_config_ = config;
     Start();
 }
 
-void FrameGrabber::DisplayFrames() {
+void NDICapture::DisplayFrames() {
     uint64_t last_version = 0;
 
     // Only create window if it doesn't exist
@@ -129,7 +129,7 @@ void FrameGrabber::DisplayFrames() {
     logger_.info("DisplayFrames stopped");
 }
 
-bool FrameGrabber::FindSources(std::vector<std::pair<NDIlib_source_t, std::pair<int, int>>>& matching_sources) {
+bool NDICapture::FindSources(std::vector<std::pair<NDIlib_source_t, std::pair<int, int>>>& matching_sources) {
     matching_sources.clear();
     uint32_t source_count = 0;
     const NDIlib_source_t* sources = nullptr;
@@ -171,7 +171,7 @@ bool FrameGrabber::FindSources(std::vector<std::pair<NDIlib_source_t, std::pair<
     return true;
 }
 
-void FrameGrabber::ReadFrames() {
+void NDICapture::ReadFrames() {
     int capture_size = remote_config_.capture().size();
     if (capture_size <= 0) {
         logger_.error("Invalid capture size in ReadFrames: {}", capture_size);
