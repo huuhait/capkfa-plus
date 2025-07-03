@@ -2,5 +2,7 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/moonlight-common-c" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/moonlight-common-c/enet" vcs="Git" />
   </component>
 </project>
