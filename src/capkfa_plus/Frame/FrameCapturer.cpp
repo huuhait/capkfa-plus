@@ -69,7 +69,7 @@ void FrameCapturer::SetConfig(const ::capkfa::RemoteConfig& config) {
     stagingTexture_.Reset();
     CreateStagingTexture();
 
-    logger_.info("Capture config set: size {}x{}, centered offset ({}, {}), {}Hz, timeout {}ms",
+    logger_.trace("Capture config set: size {}x{}, centered offset ({}, {}), {}Hz, timeout {}ms",
                  captureWidth_, captureHeight_, offsetX_, offsetY_, refreshRate_, timeoutMs_);
 
     StartCapture();
@@ -225,11 +225,10 @@ void FrameCapturer::CaptureLoop() {
 
             if (allZero || !src || captureWidth_ <= 0 || captureHeight_ <= 0 || mapped.RowPitch < captureWidth_ * 4) {
                 if (allZero) {
-                    std::cerr << "All-zero frame detected" << std::endl;
+                    logger_.error("All-zero frame detected, skipping frame");
                 } else {
-                    std::cerr << "Invalid frame parameters: src=" << (void*)src
-                              << ", width=" << captureWidth_ << ", height=" << captureHeight_
-                              << ", pitch=" << mapped.RowPitch << std::endl;
+                    logger_.error("Invalid frame parameters: src={}, width={}, height={}, pitch={}",
+                                 (void*)src, captureWidth_, captureHeight_, mapped.RowPitch);
                 }
                 context_->Unmap(stagingTexture_.Get(), 0);
                 duplication->ReleaseFrame();
@@ -271,7 +270,7 @@ void FrameCapturer::CaptureLoop() {
                 float variance = 0.0f;
                 for (float t : frameTimes) variance += (t - mean) * (t - mean);
                 variance /= frameTimes.size();
-                logger_.info("FrameCapturer FPS: {:.2f}, Frame Time Variance: {:.2f}ms", fps, variance);
+                logger_.debug("FrameCapturer FPS: {:.2f}, Frame Time Variance: {:.2f}ms", fps, variance);
                 frameCount = 0;
                 frameTimes.clear();
                 lastTime = currentTime;

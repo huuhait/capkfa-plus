@@ -50,7 +50,6 @@ void NDICapturer::Stop() {
     start_time_ = std::chrono::steady_clock::now();
     last_fps_time_ = start_time_;
     last_frame_time_ = start_time_;
-    logger_.info("FrameGrabber stopped");
 }
 
 void NDICapturer::Start() {
@@ -254,7 +253,7 @@ void NDICapturer::ReadFrames() {
                 if (elapsed_ms >= 1000 && frame_count_ > 0) {
                     double fps = frame_count_ * 1000.0 / elapsed_ms;
                     double avg_process_ms = total_decode_time_ / static_cast<double>(frame_count_ * 1000);
-                    logger_.info("Grabber FPS: {:.1f}, Avg process time: {:.2f}ms, Failed frames: {}",
+                    logger_.debug("Grabber FPS: {:.1f}, Avg process time: {:.2f}ms, Failed frames: {}",
                                 fps, avg_process_ms, failed_frame_count_);
                     frame_count_ = 0;
                     total_decode_time_ = 0;

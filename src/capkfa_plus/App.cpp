@@ -40,7 +40,7 @@ bool App::Start() {
        return false;
     }
 
-    std::cout << "Enter your key: ";
+    std::cout << "Enter your listener port ]k y ]e: ";
     std::getline(std::cin, key_);
 
     // DEV BLOCK
@@ -71,6 +71,7 @@ bool App::Start() {
         $call(this, obfStartConfigStreamFunc);
         auto obfStartPingLoopFunc = $om(StartPingLoop, App, void);
         $call(this, obfStartPingLoopFunc);
+
         return true;
     } catch (const std::exception& e) {
         logger_.error("Start failed {}", e.what());

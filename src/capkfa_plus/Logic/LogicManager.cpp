@@ -81,7 +81,7 @@ void LogicManager::ProcessLoop() {
             if (duration >= 1000) {
                 float fps = frameCount > 0 ? (float)frameCount * 1000.0f / duration : 0.0f;
                 float avgPredictionTimeMs = frameCount > 0 ? (float)(totalPredictionTimeMs / frameCount) : 0.0f;
-                logger_.info("LogicManager FPS: {:.2f}, Avg Prediction Time: {:.2f} ms", fps, avgPredictionTimeMs);
+                logger_.debug("LogicManager FPS: {:.2f}, Avg Prediction Time: {:.2f} ms", fps, avgPredictionTimeMs);
                 frameCount = 0;
                 totalPredictionTimeMs = 0.0;
                 lastTime = currentTime;

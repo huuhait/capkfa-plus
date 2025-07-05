@@ -15,7 +15,7 @@ namespace di = boost::di;
 int main() {
     try {
         auto logger = spdlog::default_logger();
-        logger->set_level(spdlog::level::debug);
+        logger->set_level(spdlog::level::info);
         // Create and store DI injector
         const auto injector = di::make_injector(
             di::bind<spdlog::logger>().to(*logger), // Bind logger directly
