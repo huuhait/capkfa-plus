@@ -38,10 +38,10 @@ private:
     void ConvertToHSV(const cv::UMat& frame);
     void FilterInRange();
     void DisplayFrame(const cv::Mat& frame, const std::string& windowName);
-    void DrawDetections(cv::Mat& image, const std::vector<Detection>& detections, float confThreshold = 0.3f);
+    void DrawDetections(cv::Mat& image, const std::vector<Detection>& detections, float confThreshold);
     std::optional<cv::Point> GetHighestMaskPoint();
-    std::optional<cv::Point> GetBiggestAimPoint(const std::vector<Detection>& detections);
-    std::tuple<short, short> CalculateCoordinates(cv::Point target, const capkfa::RemoteConfigAim_Base& aimBase, float y1 = 0, float y2 = 0);
+    std::optional<cv::Point> GetBiggestAimPoint(const std::vector<Detection>& detections, bool flick);
+    std::tuple<short, short> CalculateCoordinates(cv::Point target, const capkfa::RemoteConfigAim_Base& aimBase);
     void HandleFlick(short moveX, short moveY);
     std::vector<Detection> PredictYolo(std::shared_ptr<Frame>& frame);
     bool HasNvidiaGPU();

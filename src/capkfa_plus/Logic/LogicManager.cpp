@@ -118,7 +118,7 @@ void LogicManager::ProcessLoop() {
                 auto endPredict = std::chrono::steady_clock::now();
                 totalPredictionTimeMs += std::chrono::duration_cast<std::chrono::microseconds>(endPredict - startPredict).count() / 1000.0;
 
-                auto point = GetBiggestAimPoint(detections);
+                auto point = GetBiggestAimPoint(detections, keyWatcher_->IsFlickKeyDown());
                 if (point.has_value()) {
                     targetPoint = point.value();
                     hasTarget = true;
@@ -127,23 +127,24 @@ void LogicManager::ProcessLoop() {
 
             if (hasTarget) {
                 capkfa::RemoteConfigAim_Base aimBase = keyWatcher_->IsFlickKeyDown() ? remoteConfig_.aim().flick() : remoteConfig_.aim().aim();
-                auto [moveX, moveY] = CalculateCoordinates(targetPoint, aimBase, 0, targetPoint.y);
+                auto [moveX, moveY] = CalculateCoordinates(targetPoint, aimBase);
 
-                HandleFlick(moveX, moveY);
+                // if (remoteConfig_.mode() == ::capkfa::ObjectDetection) {
+                //     float boxCenterX = targetPoint.x;
+                //     float boxCenterY = targetPoint.y;
+                //     int cx = remoteConfig_.capture().size() / 2;
+                //     int cy = remoteConfig_.capture().size() / 2;
+                //     float distToCenter = std::sqrt((cx - boxCenterX) * (cx - boxCenterX) + (cy - boxCenterY) * (cy - boxCenterY));
+                //     if (distToCenter <= 4.0f) {
+                //         moveX = 0;
+                //         moveY = 0;
+                //     }
+                // }
 
-                if (remoteConfig_.mode() == ::capkfa::ObjectDetection) {
-                    float boxCenterX = targetPoint.x;
-                    float boxCenterY = targetPoint.y;
-                    int cx = remoteConfig_.capture().size() / 2;
-                    int cy = remoteConfig_.capture().size() / 2;
-                    float distToCenter = std::sqrt((cx - boxCenterX) * (cx - boxCenterX) + (cy - boxCenterY) * (cy - boxCenterY));
-                    if (distToCenter <= 4.0f) {
-                        moveX = 0;
-                        moveY = 0;
-                    }
-                }
-
-                if (moveX != 0 || moveY != 0) {
+                if (keyWatcher_->IsFlickKeyDown())
+                {
+                    HandleFlick(moveX, moveY);
+                } else if (moveX != 0 || moveY != 0) {
                     km_->Move(moveX, moveY);
                     int32_t inputDelay = remoteConfig_.aim().input_delay();
                     if (inputDelay > 0) {
@@ -151,6 +152,12 @@ void LogicManager::ProcessLoop() {
                     }
                 }
             }
+
+            // if (remoteConfig_.mode() == ::capkfa::ObjectDetection) {
+            //     cv::Mat displayFrame = frame->GetMat();
+            //     DrawDetections(displayFrame, PredictYolo(frame), 0.27f);
+            //     DisplayFrame(displayFrame, "Object Detection");
+            // }
         }
     } catch (const std::exception& e) {
         logger_.error("LogicManager crashed: {}", e.what());
@@ -206,7 +213,6 @@ void LogicManager::DrawDetections(cv::Mat& image, const std::vector<Detection>& 
         logger_.error("DrawDetections: Image is empty");
         return;
     }
-    const cv::Scalar boxColor(0, 255, 0);
     const int imgWidth = image.cols;
     const int imgHeight = image.rows;
 
@@ -223,16 +229,14 @@ void LogicManager::DrawDetections(cv::Mat& image, const std::vector<Detection>& 
                 continue;
             }
 
-            cv::rectangle(image, cv::Point2f(x1, y1), cv::Point2f(x2, y2), boxColor, 2, cv::LINE_AA);
-            std::string label = cv::format("%.2f", det.confidence);
-            int baseLine = 0;
-            cv::Size labelSize = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
-            float labelHeight = static_cast<float>(labelSize.height);
-            float top = y1 < labelHeight ? labelHeight : y1;
-            cv::rectangle(image, cv::Point2f(x1, top - labelSize.height - baseLine),
-                          cv::Point2f(x1 + labelSize.width, top), boxColor, cv::FILLED);
-            cv::putText(image, label, cv::Point2f(x1, top - 2), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                        cv::Scalar(0, 0, 0), 1, cv::LINE_AA);
+            cv::Scalar color = det.class_id == 0 ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255);
+            cv::rectangle(image, cv::Point2f(x1, y1), cv::Point2f(x2, y2), color, 2, cv::LINE_AA);
+
+            std::string label = cv::format("%d | conf=%.2f | obj=%.2f | cls=%.2f",
+                                          det.class_id, det.confidence, det.obj_score, det.cls_score);
+            float text_y = y1 - 7 < 10 ? 10 : y1 - 7;
+            cv::putText(image, label, cv::Point2f(x1, text_y), cv::FONT_HERSHEY_SIMPLEX,
+                        0.4, color, 1, cv::LINE_AA);
         }
     } catch (const cv::Exception& e) {
         logger_.error("DrawDetections error: {}", e.what());
@@ -250,94 +254,145 @@ std::optional<cv::Point> LogicManager::GetHighestMaskPoint() {
     return min;
 }
 
-std::optional<cv::Point> LogicManager::GetBiggestAimPoint(const std::vector<Detection>& detections) {
+std::optional<cv::Point> LogicManager::GetBiggestAimPoint(const std::vector<Detection>& detections, bool flick) {
     if (detections.empty()) return std::nullopt;
 
-    int cx = remoteConfig_.capture().size() / 2;
-    int cy = remoteConfig_.capture().size() / 2;
-    float maxDistancePx = remoteConfig_.aim().fov() / 2;
-    float maxDistSq = maxDistancePx * maxDistancePx;
+    const int captureSize = remoteConfig_.capture().size();
+    const int fov = remoteConfig_.aim().fov();
+    const int cx = captureSize / 2;
+    const int cy = captureSize / 2;
+    const float maxDistPx = fov / 2.0f;
+    const float maxDistSq = maxDistPx * maxDistPx;
+    const int fovOffset = (captureSize - fov) / 2;
 
-    const Detection* biggest = nullptr;
-    float maxArea = 0.0f;
+    const Detection* best = nullptr;
+    float bestScore = -1.0f;
 
     for (const auto& det : detections) {
-        float centerX = (det.x1 + det.x2) / 2.0f;
-        float centerY = (det.y1 + det.y2) / 2.0f;
+        if (det.confidence < 0.27f) continue;
+
+        float centerX = (det.x1 + det.x2) * 0.5f;
+        float centerY = (det.y1 + det.y2) * 0.5f;
         float distSq = (centerX - cx) * (centerX - cx) + (centerY - cy) * (centerY - cy);
 
-        if (distSq < maxDistSq) {
-            float area = (det.x2 - det.x1) * (det.y2 - det.y1);
-            if (area > maxArea) {
-                maxArea = area;
-                biggest = &det;
+        if (centerX < fovOffset || centerX > (captureSize - fovOffset) ||
+            centerY < fovOffset || centerY > (captureSize - fovOffset)) {
+            continue;
             }
+
+        float score = det.confidence;
+        float area = (det.x2 - det.x1) * (det.y2 - det.y1);
+        score += area / (fov * fov) * 0.5f;
+        score -= distSq / maxDistSq * 0.3f;
+
+        if (score > bestScore) {
+            best = &det;
+            bestScore = score;
         }
     }
 
-    if (biggest) {
-        return cv::Point((biggest->x1 + biggest->x2) / 2, biggest->y2);
-    }
-    return std::nullopt;
+    if (!best) return std::nullopt;
+
+    // Use raw detection center coordinates
+    float centerX = (best->x1 + best->x2) * 0.5f;
+    float boxHeight = best->y2 - best->y1;
+    float aimY = best->class_id == 1 ? (best->y1 + best->y2) * 0.5f : best->y1 + boxHeight * 0.07f;
+
+    cv::Point aimPoint(static_cast<int>(centerX), static_cast<int>(aimY));
+    logger_.info("Selected detection: class={}, conf={:.2f}, aimPoint=({}, {}), score={:.2f}",
+                best->class_id, best->confidence, aimPoint.x, aimPoint.y, bestScore);
+    return aimPoint;
 }
 
-std::tuple<short, short> LogicManager::CalculateCoordinates(cv::Point target, const capkfa::RemoteConfigAim_Base& aimBase, float y1, float y2) {
-    int zoneX = (remoteConfig_.mode() == capkfa::ObjectDetection ? remoteConfig_.capture().size() : remoteConfig_.aim().fov()) / 2;
-    int zoneY = (remoteConfig_.mode() == capkfa::ObjectDetection ? remoteConfig_.capture().size() : remoteConfig_.aim().fov()) / 2;
-    int adjustedY = remoteConfig_.mode() == ::capkfa::ObjectDetection ? static_cast<int>(y2) - 3 : target.y;
+std::tuple<short, short> LogicManager::CalculateCoordinates(cv::Point target, const capkfa::RemoteConfigAim_Base& aimBase) {
+    /* ---------- Basic deltas ---------- */
+    const int captureSize = remoteConfig_.capture().size();      // e.g. 256
+    const int cx          = captureSize / 2;
+    const int cy          = captureSize / 2;
 
-    int dx = target.x - zoneX;
-    int dy = adjustedY - zoneY;
-    dx += remoteConfig_.aim().offset_x();
-    dy += remoteConfig_.aim().offset_y();
+    const int offsetX = remoteConfig_.aim().offset_x();
+    const int offsetY = remoteConfig_.aim().offset_y();
 
-    double distance = std::sqrt(dx * dx + dy * dy);
-    double maxDistance = std::sqrt(2.0) * (remoteConfig_.aim().fov() / 2.0);
+    const int dx = target.x - cx + offsetX;
+    const int dy = target.y - cy + offsetY;
 
-    double weight = std::clamp(1.0 - std::pow(distance / maxDistance, 2.0), 0.05, 1.0);
-    double smoothX = aimBase.smooth_x().min() + (aimBase.smooth_x().max() - aimBase.smooth_x().min()) * weight;
-    double smoothY = aimBase.smooth_y().min() + (aimBase.smooth_y().max() - aimBase.smooth_y().min()) * weight;
+    /* ---------- Dead-zone ---------- */
+    const float distSq          = static_cast<float>(dx * dx + dy * dy);
+    constexpr float deadZoneRad = 2.0f;
+    if (distSq < deadZoneRad * deadZoneRad)
+        return {0, 0};
 
-    short moveX = static_cast<short>(std::round(dx / smoothX));
-    short moveY = static_cast<short>(std::round(dy / smoothY));
+    /* ---------- Smooth factor based on FOV weighting ---------- */
+    const double distance     = std::sqrt(distSq);
+    const double maxDistance  = remoteConfig_.aim().fov() / 2.0;
+    const double weight       = std::clamp(distance / maxDistance, 0.1, 1.0);
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(15, 30);
-    short clampValue = static_cast<short>(dis(gen));
+    const double smoothX =
+        aimBase.smooth_x().min() +
+        (aimBase.smooth_x().max() - aimBase.smooth_x().min()) * weight;
 
-    moveX = std::clamp(moveX, static_cast<short>(-clampValue), static_cast<short>(clampValue));
-    moveY = std::clamp(moveY, static_cast<short>(-clampValue), static_cast<short>(clampValue));
+    const double smoothY =
+        aimBase.smooth_y().min() +
+        (aimBase.smooth_y().max() - aimBase.smooth_y().min()) * weight;
 
-    if (remoteConfig_.aim().recoil().enabled()) {
-        int duration = remoteConfig_.aim().recoil().duration();
-        int factor = remoteConfig_.aim().recoil().factor();
+    /* ---------- Sub-pixel accumulator ---------- */
+    static double accX = 0.0, accY = 0.0;
+    accX += dx / smoothX;
+    accY += dy / smoothY;
+
+    short moveX = 0, moveY = 0;
+
+    if (std::abs(accX) >= 0.6 || std::abs(accY) >= 0.6) {
+        moveX = static_cast<short>(std::round(accX));
+        moveY = static_cast<short>(std::round(accY));
+        accX -= moveX;
+        accY -= moveY;
+
+        moveX = std::clamp<int>(moveX, -15, 30);
+        moveY = std::clamp<int>(moveY, -15, 30);
+    }
+
+    /* ---------- Recoil compensation (applied after smoothing) ---------- */
+    if (!keyWatcher_->IsFlickKeyDown() && remoteConfig_.aim().recoil().enabled()) {
+        const int duration = remoteConfig_.aim().recoil().duration(); // ms
+        const int factor   = remoteConfig_.aim().recoil().factor();   // %
+        constexpr int clampValue = 30;                                // safety
+
         if (keyWatcher_->IsShotKeyDown()) {
-            if (!recoil_active_) {
-                recoil_active_ = true;
+            if (!recoil_active_) {          // first shot
+                recoil_active_    = true;
                 recoil_start_time_ = std::chrono::steady_clock::now();
             }
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - recoil_start_time_).count();
+
+            const auto now      = std::chrono::steady_clock::now();
+            const auto elapsed  = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     now - recoil_start_time_)
+                                     .count();
+
             if (elapsed <= duration && !recoil_pattern_.empty()) {
-                float t = elapsed / static_cast<float>(duration);
-                size_t pattern_size = recoil_pattern_.size();
-                float index = t * (pattern_size - 1);
-                size_t idx = static_cast<size_t>(index);
-                float frac = index - idx;
+                const float t          = elapsed / static_cast<float>(duration);
+                const size_t n         = recoil_pattern_.size();
+                const float  fIdx      = t * (n - 1);
+                const size_t idx       = static_cast<size_t>(fIdx);
+                const float  frac      = fIdx - idx;
 
-                float base_offset = (idx < pattern_size - 1)
-                    ? recoil_pattern_[idx] + frac * (recoil_pattern_[idx + 1] - recoil_pattern_[idx])
-                    : recoil_pattern_.back();
+                /* linear-interpolated pattern value */
+                const float baseOffset = (idx < n - 1)
+                                             ? recoil_pattern_[idx] +
+                                                   frac * (recoil_pattern_[idx + 1] -
+                                                           recoil_pattern_[idx])
+                                             : recoil_pattern_.back();
 
-                float recoil_offset = base_offset * (factor / 100.0f);
-                moveY += static_cast<short>(recoil_offset);
-                moveY = std::clamp(moveY, static_cast<short>(-clampValue), static_cast<short>(clampValue));
+                const float recoilOffset = baseOffset * (factor / 100.0f);
+                moveY += static_cast<short>(recoilOffset);
+                moveY  = std::clamp(moveY,
+                                   static_cast<short>(-clampValue),
+                                   static_cast<short>(clampValue));
             } else {
-                recoil_active_ = false;
+                recoil_active_ = false;     // finished pattern
             }
         } else {
-            recoil_active_ = false;
+            recoil_active_ = false;         // trigger released
         }
     }
 
@@ -351,8 +406,19 @@ void LogicManager::HandleFlick(short moveX, short moveY) {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastClick).count();
 
-    bool isIdealToFlick = std::abs(moveX) <= 1 && std::abs(moveY) <= 1;
-    if (isIdealToFlick && elapsed > 300) {
+    if (moveX > 5 && moveY > 5)
+    {
+        moveX = moveX/0.7;
+        moveY = moveY/0.7;
+    }
+
+    logger_.info("Flick moveX: {}, moveY: {}", moveX, moveY);
+
+    if (moveX != 0 || moveY != 0) {
+        km_->Move(moveX, moveY);
+    }
+
+    if (elapsed > 300 && moveX == 0 && moveY == 0) {
         km_->Click();
         lastClick = now;
     }

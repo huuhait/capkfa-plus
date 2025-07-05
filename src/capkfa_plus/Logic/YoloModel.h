@@ -9,13 +9,18 @@
 
 struct YoloConfig {
     static constexpr int INPUT_SIZE = 256;
-    static constexpr float CONF_THRESHOLD = 0.1f;
-    static constexpr float NMS_IOU_THRESHOLD = 0.6f;
+    static constexpr float CONF_THRESHOLD = 0.27f;
+    static constexpr float MIN_OBJ = 0.20f;
+    static constexpr float NMS_IOU_THRESHOLD = 0.35f;
+    static constexpr int TOP_K = 300;
 };
 
 struct Detection {
     float x1, y1, x2, y2;
     float confidence;
+    float obj_score;
+    float cls_score;
+    int class_id;
 };
 
 class YoloModel {
@@ -30,6 +35,7 @@ private:
     std::vector<float> processOutputTensor(std::vector<Ort::Value>& output_tensors);
     Ort::Value createInputTensor(const cv::Mat& blob_fp16);
     cv::Mat preprocessFrame(std::shared_ptr<Frame>& frame);
+    float sigmoid(float x) const;
 
     spdlog::logger& logger_;
     Ort::Env env_;
@@ -39,6 +45,8 @@ private:
     cv::Mat rgb_buffer_;
     cv::Mat blob_buffer_;
     std::vector<Ort::Float16_t> input_buffer_;
+    std::vector<float> xyxy_buffer_;
+    std::vector<float> scores_buffer_;
     std::mutex predict_mutex_;
 };
 

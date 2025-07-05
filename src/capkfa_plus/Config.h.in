@@ -1,0 +1,6 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+#define LOCKED_HWID $o("@LOCKED_HWID@")
+
+#endif

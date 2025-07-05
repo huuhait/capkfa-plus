@@ -3,6 +3,7 @@
 
 #include <opencv2/core/ocl.hpp>
 
+#include "Config.h"
 #include "Obfuscate.h"
 #include "HWIDTool.h"
 #include "Logic/LogicManager.h"
@@ -28,12 +29,11 @@ App::App(spdlog::logger& logger,
 bool App::Start() {
     cv::ocl::setUseOpenCL(true);
 
-    constexpr auto obfLockedHwid = $o("DC50AE1D1B673FFCF1F032DF0D1BF0B1ABE908EBB06C26000F64F2721CB8DABF");
     constexpr auto obfDevKey = $o("MIKU-BC76F17DC89C8F8881EA83822C2FCA54");
     auto obfGetHWID = $of(HWIDTool::GetHWID);
     std:: string computerHWID = obfGetHWID();
 
-    hwid_ = $d_inline(obfLockedHwid);
+    hwid_ = $d_inline(LOCKED_HWID);
 
     if (computerHWID != hwid_) {
        logger_.error("HWID mismatch {} != {}", computerHWID, hwid_);

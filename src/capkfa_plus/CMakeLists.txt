@@ -1,3 +1,10 @@
+set(LOCKED_HWID "7607025F02906BF47389225CBEF1EE69343B18B3089E7773DE95614BF25719B1")
+
+configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/Config.h.in
+        ${CMAKE_CURRENT_BINARY_DIR}/Config.h
+)
+
 # Define proto files list
 set(PROTO_FILES
         "${CMAKE_SOURCE_DIR}/proto/license.proto"
@@ -37,6 +44,7 @@ add_executable(CapkfaPlus
         Frame/NDICapturer.h
         Frame/MoonlightCapturer.cpp
         Frame/MoonlightCapturer.h
+        ${CMAKE_CURRENT_BINARY_DIR}/Config.h
 )
 
 add_dependencies(CapkfaPlus CapkfaPlus_proto)
@@ -76,6 +84,7 @@ target_include_directories(CapkfaPlus PRIVATE
         ${TENSORRT_INCLUDE_DIR}
         ${NDI_INCLUDE_DIR}
         "C:/library/ONNX/include"
+        ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_BINARY_DIR}
         ${CMAKE_BINARY_DIR}/proto
 )
