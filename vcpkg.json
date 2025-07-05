@@ -12,9 +12,6 @@
     "protobuf",
     "grpc",
     "cuda",
-    "bzip2",
-    "libjpeg-turbo",
-    "ffmpeg",
     "spdlog"
   ]
 }

@@ -61,14 +61,10 @@ target_link_libraries(CapkfaPlus PRIVATE
         ${OpenCV_LIBS}
         Boost::asio
         Boost::system
-        JPEG::JPEG
-        BZip2::BZip2
         spdlog::spdlog
         ${CUDA_LIBRARIES}
 #        ${TENSORRT_LIBRARY}
-        ${FFMPEG_LIBRARIES}
         ${NDI_LIBRARY}
-        $<IF:$<TARGET_EXISTS:libjpeg-turbo::turbojpeg>,libjpeg-turbo::turbojpeg,libjpeg-turbo::turbojpeg-static>
         "C:/library/ONNX/lib/onnxruntime.lib"
 )
 
@@ -80,7 +76,6 @@ target_include_directories(CapkfaPlus PRIVATE
         ${BEXT_DI_INCLUDE_DIRS}
         ${Protobuf_INCLUDE_DIRS}
         ${CUDA_INCLUDE_DIRS}
-        ${FFMPEG_INCLUDE_DIRS}
 #        ${TENSORRT_INCLUDE_DIR}
         ${NDI_INCLUDE_DIR}
         "C:/library/ONNX/include"
@@ -88,7 +83,5 @@ target_include_directories(CapkfaPlus PRIVATE
         ${CMAKE_BINARY_DIR}
         ${CMAKE_BINARY_DIR}/proto
 )
-
-target_link_directories(CapkfaPlus PRIVATE ${FFMPEG_LIBRARY_DIRS})
 
 message(STATUS "CapkfaPlus include dir: ${CMAKE_SOURCE_DIR}/src/include")
