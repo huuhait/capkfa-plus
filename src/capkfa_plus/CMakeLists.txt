@@ -51,9 +51,9 @@ add_dependencies(CapkfaPlus CapkfaPlus_proto)
 
 target_link_libraries(CapkfaPlus PRIVATE
         HWID
-        # d3d11
-        # d3d12
-        # dxgi
+        d3d11
+        d3d12
+        dxgi
         ws2_32
         mswsock
         protobuf::libprotobuf
