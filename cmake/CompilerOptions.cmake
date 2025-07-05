@@ -5,6 +5,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 set(ZIP_PASSWORD "cheetah")
 
+set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
+
 # Toolchain
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
     message(STATUS "Using toolchain: ${CMAKE_TOOLCHAIN_FILE}")
