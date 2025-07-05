@@ -299,16 +299,17 @@ std::optional<cv::Point> LogicManager::GetBiggestAimPoint(const std::vector<Dete
     float aimY = best->class_id == 1 ? (best->y1 + best->y2) * 0.5f : best->y1 + boxHeight * 0.07f;
 
     cv::Point aimPoint(static_cast<int>(centerX), static_cast<int>(aimY));
-    logger_.info("Selected detection: class={}, conf={:.2f}, aimPoint=({}, {}), score={:.2f}",
-                best->class_id, best->confidence, aimPoint.x, aimPoint.y, bestScore);
+    // logger_.info("Selected detection: class={}, conf={:.2f}, aimPoint=({}, {}), score={:.2f}",
+    //             best->class_id, best->confidence, aimPoint.x, aimPoint.y, bestScore);
     return aimPoint;
 }
 
 std::tuple<short, short> LogicManager::CalculateCoordinates(cv::Point target, const capkfa::RemoteConfigAim_Base& aimBase) {
     /* ---------- Basic deltas ---------- */
     const int captureSize = remoteConfig_.capture().size();      // e.g. 256
-    const int cx          = captureSize / 2;
-    const int cy          = captureSize / 2;
+    const int fov         = remoteConfig_.aim().fov();
+    const int cx          = (remoteConfig_.mode() == capkfa::ObjectDetection ? captureSize : fov) / 2;
+    const int cy          = (remoteConfig_.mode() == capkfa::ObjectDetection ? captureSize : fov) / 2;
 
     const int offsetX = remoteConfig_.aim().offset_x();
     const int offsetY = remoteConfig_.aim().offset_y();
