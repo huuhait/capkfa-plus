@@ -15,6 +15,13 @@ find_program(PROTOC_EXECUTABLE protoc REQUIRED)
 #    message(FATAL_ERROR "TensorRT not found")
 #endif()
 
+# ONNX
+find_library(ONNX_LIBRARY NAMES onnxruntime PATHS "C:/library/ONNX/lib")
+find_path(ONNX_INCLUDE_DIR NAMES onnxruntime_cxx_api.h PATHS "C:/library/ONNX/include")
+if(NOT ONNX_LIBRARY OR NOT ONNX_INCLUDE_DIR)
+    message(FATAL_ERROR "NDI not found")
+endif()
+
 # NDI
 find_library(NDI_LIBRARY NAMES Processing.NDI.Lib.x64 PATHS "C:/Program Files/NDI/NDI 6 SDK/Lib/x64")
 find_path(NDI_INCLUDE_DIR NAMES Processing.NDI.Lib.h PATHS "C:/Program Files/NDI/NDI 6 SDK/Include")

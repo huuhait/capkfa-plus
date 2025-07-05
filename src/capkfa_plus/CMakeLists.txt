@@ -64,8 +64,8 @@ target_link_libraries(CapkfaPlus PRIVATE
         spdlog::spdlog
         ${CUDA_LIBRARIES}
 #        ${TENSORRT_LIBRARY}
+        ${ONNX_LIBRARY}
         ${NDI_LIBRARY}
-        "C:/library/ONNX/lib/onnxruntime.lib"
 )
 
 target_include_directories(CapkfaPlus PRIVATE
@@ -77,11 +77,17 @@ target_include_directories(CapkfaPlus PRIVATE
         ${Protobuf_INCLUDE_DIRS}
         ${CUDA_INCLUDE_DIRS}
 #        ${TENSORRT_INCLUDE_DIR}
+        ${ONNX_INCLUDE_DIR}
         ${NDI_INCLUDE_DIR}
-        "C:/library/ONNX/include"
         ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_BINARY_DIR}
         ${CMAKE_BINARY_DIR}/proto
 )
 
 message(STATUS "CapkfaPlus include dir: ${CMAKE_SOURCE_DIR}/src/include")
+
+copy_to_dist(CapkfaPlus
+        "C:/Program Files/NDI/NDI 6 SDK/Bin/x64/Processing.NDI.Lib.x64.dll"
+        "C:/library/ONNX/lib/onnxruntime.dll"
+        "${CMAKE_SOURCE_DIR}/models"
+)
