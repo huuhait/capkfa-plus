@@ -13,11 +13,11 @@ find_path(BEXT_DI_INCLUDE_DIRS "boost/di.hpp")
 find_program(PROTOC_EXECUTABLE protoc REQUIRED)
 
 # TensorRT
-find_library(TENSORRT_LIBRARY NAMES nvinfer_10 PATHS "C:/library/TensorRT/lib")
-find_path(TENSORRT_INCLUDE_DIR NAMES NvInfer.h PATHS "C:/library/TensorRT/include")
-if(NOT TENSORRT_LIBRARY OR NOT TENSORRT_INCLUDE_DIR)
-    message(FATAL_ERROR "TensorRT not found")
-endif()
+#find_library(TENSORRT_LIBRARY NAMES nvinfer_10 PATHS "C:/library/TensorRT/lib")
+#find_path(TENSORRT_INCLUDE_DIR NAMES NvInfer.h PATHS "C:/library/TensorRT/include")
+#if(NOT TENSORRT_LIBRARY OR NOT TENSORRT_INCLUDE_DIR)
+#    message(FATAL_ERROR "TensorRT not found")
+#endif()
 
 # NDI
 find_library(NDI_LIBRARY NAMES Processing.NDI.Lib.x64 PATHS "C:/Program Files/NDI/NDI 6 SDK/Lib/x64")

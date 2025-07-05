@@ -65,7 +65,7 @@ target_link_libraries(CapkfaPlus PRIVATE
         BZip2::BZip2
         spdlog::spdlog
         ${CUDA_LIBRARIES}
-        ${TENSORRT_LIBRARY}
+#        ${TENSORRT_LIBRARY}
         ${FFMPEG_LIBRARIES}
         ${NDI_LIBRARY}
         $<IF:$<TARGET_EXISTS:libjpeg-turbo::turbojpeg>,libjpeg-turbo::turbojpeg,libjpeg-turbo::turbojpeg-static>
@@ -81,7 +81,7 @@ target_include_directories(CapkfaPlus PRIVATE
         ${Protobuf_INCLUDE_DIRS}
         ${CUDA_INCLUDE_DIRS}
         ${FFMPEG_INCLUDE_DIRS}
-        ${TENSORRT_INCLUDE_DIR}
+#        ${TENSORRT_INCLUDE_DIR}
         ${NDI_INCLUDE_DIR}
         "C:/library/ONNX/include"
         ${CMAKE_CURRENT_BINARY_DIR}
