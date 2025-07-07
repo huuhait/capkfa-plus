@@ -52,7 +52,7 @@ private:
     std::thread licensePingThread_;
     std::atomic<bool> isPingingLicense_;
 
-    std::string version_ = "2.0.1";
+    std::string version_ = "2.1.0";
 };
 
 #endif // APP_H

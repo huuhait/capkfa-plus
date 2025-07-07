@@ -172,6 +172,7 @@ void App::StopPingLoop() {
 void App::ProcessConfigStreaming() {
     ::capkfa::GetConfigRequest request;
     request.set_key(key_);
+    request.set_session_id(session_id_);
     LicenseClient::StreamConfigReader reader = licenseClient_->StreamConfig(request);
     ::capkfa::GetConfigResponse response;
 
@@ -185,7 +186,7 @@ void App::ProcessConfigStreaming() {
                 {
                     ndiCapturer_->Stop();
                     frameCapturer_->StopCapture();
-                    if (response.remote_config().capture().mode().type() == ::capkfa::RemoteConfigCaptureMode_CaptureModeType_NDI) {
+                    if (response.remote_config().capture().mode() == ::capkfa::RemoteConfigCapture_Mode_NDI) {
                         ndiCapturer_->SetConfig(response.remote_config());
                     } else {
                         frameCapturer_->SetConfig(response.remote_config());
@@ -227,14 +228,12 @@ void App::ProcessPingLoop()
             request.set_session_id(session_id_);
             request.set_version(version_);
             auto response = licenseClient_->Ping(request);
-            logger_.info("Ping license response: {}", response.valid());
             if (!response.valid())
             {
                 throw std::runtime_error("Ping response failed (gonna session killed)");
             }
         } catch (const std::exception& e)
         {
-            logger_.error("Ping failed: {}", e.what());
             Stop();
         }
     }

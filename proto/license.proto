@@ -59,11 +59,12 @@ message RemoteConfigMouseServer {
   string uri = 1;
 }
 
-message RemoteConfigAim {
+message RemoteConfigGame {
   message Recoil {
     bool enabled = 1;
-    int32 duration = 2;
-    int32 factor = 3;
+    int32 delay = 2;
+    int32 duration = 3;
+    int32 factor = 4;
   }
 
   message Base {
@@ -73,52 +74,57 @@ message RemoteConfigAim {
     }
 
     bool enabled = 1;
+    int32 fov = 2;
     string key = 3;
-    Smooth smooth_x = 4;
-    Smooth smooth_y = 5;
+    int32 offset_x = 4;
+    int32 offset_y = 5;
+    Smooth smooth_x = 6;
+    Smooth smooth_y = 7;
   }
 
-  int32 fov = 1;
-  int32 offset_x = 2;
-  int32 offset_y = 3;
+  message Track {
+    Base base = 1;
+  }
+
+  message Magnet {
+    Base base = 1;
+    float sensitivity = 2;
+    int32 delay = 3;
+  }
+
   int32 input_delay = 4;
   Recoil recoil = 5;
-  Base aim = 6;
-  Base flick = 7;
+  Track aim = 6;
+  Magnet flick = 7;
 }
 
-enum RemoteConfigMode {
-  Unknown = 0;
-  PixelSeek = 1;
-  ObjectDetection = 2;
-}
-
-message RemoteConfigCaptureMode {
-  enum CaptureModeType {
+message RemoteConfigCapture {
+  enum Mode {
     Unknown = 0;
     DXGI = 1;
     NDI = 2;
   }
-
-  CaptureModeType type = 1;
-  string source = 2; // For NDI
-}
-
-message RemoteConfigCapture {
   int32 size = 1;
-  RemoteConfigCaptureMode mode = 2;
+  Mode mode = 2;
 }
 
 // RemoteConfig message
 message RemoteConfig {
+  enum Mode {
+    Unknown = 0;
+    PixelSeek = 1;
+    ObjectDetection = 2;
+  }
+
   RemoteConfigCapture capture = 1;
-  RemoteConfigMode mode = 2;
-  RemoteConfigAim aim = 3;
+  Mode mode = 2;
+  RemoteConfigGame game = 3;
   RemoteConfigMouseServer mouse_server = 4;
 }
 
 message GetConfigRequest {
   string key = 1;
+  string session_id = 2;
 }
 
 message GetConfigResponse {

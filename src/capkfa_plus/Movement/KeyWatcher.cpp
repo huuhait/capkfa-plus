@@ -30,7 +30,7 @@ uint8_t KeyWatcher::GetKey(const std::string& key) {
 }
 
 bool KeyWatcher::IsAimKeyDown() {
-    uint8_t key = GetKey(config_.aim().aim().key());
+    uint8_t key = GetKey(config_.game().aim().base().key());
 
     if (key == 0) {
         return false;
@@ -40,7 +40,7 @@ bool KeyWatcher::IsAimKeyDown() {
 }
 
 bool KeyWatcher::IsFlickKeyDown() {
-    uint8_t key = GetKey(config_.aim().flick().key());
+    uint8_t key = GetKey(config_.game().flick().base().key());
 
     if (key == 0) {
         return false;

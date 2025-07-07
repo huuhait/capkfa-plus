@@ -15,11 +15,11 @@ LogicManager::~LogicManager() {
 
 void LogicManager::Start() {
     if (!isRunning_) {
-        if (remoteConfig_.mode() != ::capkfa::ObjectDetection && (hsvFrame_.empty() || mask_.empty())) {
+        if (remoteConfig_.mode() != ::capkfa::RemoteConfig_Mode_ObjectDetection && (hsvFrame_.empty() || mask_.empty())) {
             logger_.error("HSV mode not configured. Call SetConfig to enable processing.");
             return;
         }
-        if (remoteConfig_.mode() == ::capkfa::ObjectDetection && (!yoloModel_ || !frameSlot_ || !keyWatcher_ || !km_)) {
+        if (remoteConfig_.mode() == ::capkfa::RemoteConfig_Mode_ObjectDetection && (!yoloModel_ || !frameSlot_ || !keyWatcher_ || !km_)) {
             logger_.error("YOLO mode initialization failed: missing dependencies.");
             return;
         }
@@ -50,20 +50,14 @@ void LogicManager::SetConfig(const ::capkfa::RemoteConfig& config) {
 
     remoteConfig_ = config;
 
-    if (remoteConfig_.mode() != ::capkfa::ObjectDetection) {
-        int fov = config.aim().fov();
-        if (fov <= 0 || fov > remoteConfig_.capture().size()) {
-            throw std::runtime_error("Invalid FOV: " + std::to_string(fov));
-        }
-        int offset = (remoteConfig_.capture().size() - fov) / 2;
-        roi_ = cv::Rect(offset, offset, fov, fov);
-        hsvFrame_ = cv::UMat(fov, fov, CV_8UC3);
-        mask_ = cv::UMat(fov, fov, CV_8UC1);
+    if (remoteConfig_.mode() != ::capkfa::RemoteConfig_Mode_ObjectDetection) {
+        int captureSize = remoteConfig_.capture().size();
+        hsvFrame_ = cv::UMat(captureSize, captureSize, CV_8UC3);
+        mask_ = cv::UMat(captureSize, captureSize, CV_8UC1);
         if (hsvFrame_.empty() || mask_.empty()) {
             logger_.error("Failed to initialize hsvFrame_ or mask_");
             throw std::runtime_error("Resource initialization failed");
         }
-        logger_.info("HSV config set: FOV {}x{}, ROI offset {}", fov, fov, offset);
     }
     Start();
 }
@@ -102,10 +96,11 @@ void LogicManager::ProcessLoop() {
             cv::Point targetPoint;
             bool hasTarget = false;
 
-            if (remoteConfig_.mode() == ::capkfa::PixelSeek) {
+            if (remoteConfig_.mode() == ::capkfa::RemoteConfig_Mode_PixelSeek)
+            {
                 if (hsvFrame_.empty() || mask_.empty()) continue;
-                cv::UMat croppedFrame = frame->ToUMat()(roi_);
-                ConvertToHSV(croppedFrame);
+                cv::UMat umatFrame = frame->ToUMat();
+                ConvertToHSV(umatFrame);
                 FilterInRange();
                 auto point = GetHighestMaskPoint();
                 if (point.has_value()) {
@@ -118,7 +113,7 @@ void LogicManager::ProcessLoop() {
                 auto endPredict = std::chrono::steady_clock::now();
                 totalPredictionTimeMs += std::chrono::duration_cast<std::chrono::microseconds>(endPredict - startPredict).count() / 1000.0;
 
-                auto point = GetBiggestAimPoint(detections, keyWatcher_->IsFlickKeyDown());
+                auto point = GetObjectDetectionAimPoint(detections);
                 if (point.has_value()) {
                     targetPoint = point.value();
                     hasTarget = true;
@@ -126,30 +121,15 @@ void LogicManager::ProcessLoop() {
             }
 
             if (hasTarget) {
-                capkfa::RemoteConfigAim_Base aimBase = keyWatcher_->IsFlickKeyDown() ? remoteConfig_.aim().flick() : remoteConfig_.aim().aim();
-                auto [moveX, moveY] = CalculateCoordinates(targetPoint, aimBase);
-
-                // if (remoteConfig_.mode() == ::capkfa::ObjectDetection) {
-                //     float boxCenterX = targetPoint.x;
-                //     float boxCenterY = targetPoint.y;
-                //     int cx = remoteConfig_.capture().size() / 2;
-                //     int cy = remoteConfig_.capture().size() / 2;
-                //     float distToCenter = std::sqrt((cx - boxCenterX) * (cx - boxCenterX) + (cy - boxCenterY) * (cy - boxCenterY));
-                //     if (distToCenter <= 4.0f) {
-                //         moveX = 0;
-                //         moveY = 0;
-                //     }
-                // }
+                capkfa::RemoteConfigGame_Base aimBase = keyWatcher_->IsFlickKeyDown() ? remoteConfig_.game().flick().base() : remoteConfig_.game().aim().base();
+                AimPoint aimPoint = CalculateCoordinates(targetPoint, aimBase);
 
                 if (keyWatcher_->IsFlickKeyDown())
                 {
-                    HandleFlick(moveX, moveY);
-                } else if (moveX != 0 || moveY != 0) {
-                    km_->Move(moveX, moveY);
-                    int32_t inputDelay = remoteConfig_.aim().input_delay();
-                    if (inputDelay > 0) {
-                        std::this_thread::sleep_for(std::chrono::microseconds(inputDelay));
-                    }
+                    HandleFlick(aimPoint);
+                } else {
+                    aimPoint = CalculateRecoil(aimPoint);
+                    Move(aimPoint);
                 }
             }
 
@@ -178,14 +158,27 @@ void LogicManager::ConvertToHSV(const cv::UMat& frame) {
 }
 
 void LogicManager::FilterInRange() {
-    if (!hsvFrame_.empty() && !mask_.empty()) {
+    if (!hsvFrame_.empty()) {
         cv::Scalar lowerb2(140, 60, 240);
         cv::Scalar upperb2(160, 255, 255);
-        cv::inRange(hsvFrame_, lowerb2, upperb2, mask_);
-        cv::ocl::finish();
+
+        try {
+            cv::inRange(hsvFrame_, lowerb2, upperb2, mask_);
+
+            if (mask_.channels() != 1 || mask_.dims != 2) {
+                logger_.error("FilterInRange: mask_ invalid shape! channels = {}, dims = {}", mask_.channels(), mask_.dims);
+                mask_.release(); // Prevent further use
+                return;
+            }
+
+            cv::ocl::finish();
+        } catch (const cv::Exception& e) {
+            logger_.error("FilterInRange OpenCV error: {}", e.what());
+            mask_.release();
+        }
     } else {
-        logger_.error("FilterInRange called with empty hsvFrame");
-        mask_ = cv::UMat();
+        logger_.error("FilterInRange: hsvFrame_ is empty");
+        mask_ = cv::UMat(); // Clear
     }
 }
 
@@ -248,84 +241,183 @@ std::optional<cv::Point> LogicManager::GetHighestMaskPoint() {
     cv::findNonZero(mask_, points);
     if (points.empty()) return std::nullopt;
 
-    cv::Point min = points[0];
-    for (size_t i = 1; i < points.size(); ++i)
-        if (points[i].y < min.y) min = points[i];
+    const int captureSize = remoteConfig_.capture().size(); // e.g. 256
+    const int fov = Fov();                                  // e.g. 80
+    const int offset = (captureSize - fov) / 2;
+
+    cv::Point min(-1, INT_MAX);
+
+    for (const auto& pt : points) {
+        if (pt.x < offset || pt.x >= (captureSize - offset) ||
+            pt.y < offset || pt.y >= (captureSize - offset)) {
+            continue; // outside FOV
+            }
+
+        if (pt.y < min.y) {
+            min = pt;
+        }
+    }
+
+    if (min.y == INT_MAX)
+        return std::nullopt;
+
     return min;
 }
 
-std::optional<cv::Point> LogicManager::GetBiggestAimPoint(const std::vector<Detection>& detections, bool flick) {
+std::optional<cv::Point> LogicManager::GetObjectDetectionAimPoint(const std::vector<Detection>& detections) {
     if (detections.empty()) return std::nullopt;
 
     const int captureSize = remoteConfig_.capture().size();
-    const int fov = remoteConfig_.aim().fov();
+    const int fov = Fov();
     const int cx = captureSize / 2;
     const int cy = captureSize / 2;
     const float maxDistPx = fov / 2.0f;
     const float maxDistSq = maxDistPx * maxDistPx;
     const int fovOffset = (captureSize - fov) / 2;
 
-    const Detection* best = nullptr;
+    struct Target {
+        const Detection* body = nullptr;
+        const Detection* head = nullptr;
+    };
+
+    std::vector<Target> targets;
+
+    // Step 1: Group detections by size & geometry (no class id)
+    for (const auto& body : detections) {
+        if (body.confidence < 0.27f) continue;
+
+        float bodyWidth = body.x2 - body.x1;
+        float bodyHeight = body.y2 - body.y1;
+        float bodyArea = bodyWidth * bodyHeight;
+        if (bodyArea <= 0) continue;
+
+        Target target;
+        target.body = &body;
+
+        for (const auto& head : detections) {
+            if (&head == &body || head.confidence < 0.27f) continue;
+
+            float headWidth = head.x2 - head.x1;
+            float headHeight = head.y2 - head.y1;
+            float headArea = headWidth * headHeight;
+            if (headArea <= 0 || headArea >= bodyArea * 0.9f) continue; // must be smaller
+
+            // Head aspect ratio must be tall-ish
+            float aspectRatio = headHeight / headWidth;
+            if (aspectRatio < 1.2f) continue;
+
+            float headCenterY = (head.y1 + head.y2) * 0.5f;
+            float bodyCenterY = (body.y1 + body.y2) * 0.5f;
+            bool aboveBodyCenter = headCenterY < bodyCenterY;
+
+            // Head must be inside upper part of body box
+            bool inside = head.x1 >= body.x1 &&
+                          head.x2 <= body.x2 &&
+                          head.y1 >= body.y1 &&
+                          head.y2 <= (body.y1 + bodyHeight * 0.4f);
+
+            if (aboveBodyCenter && inside) {
+                target.head = &head;
+                break;
+            }
+        }
+
+        targets.push_back(target);
+    }
+
+    // Step 2: Score targets
+    const Target* bestTarget = nullptr;
     float bestScore = -1.0f;
 
-    for (const auto& det : detections) {
-        if (det.confidence < 0.27f) continue;
+    for (const auto& target : targets) {
+        const Detection* det = target.body;
+        if (!det) continue;
 
-        float centerX = (det.x1 + det.x2) * 0.5f;
-        float centerY = (det.y1 + det.y2) * 0.5f;
+        float centerX = (det->x1 + det->x2) * 0.5f;
+        float centerY = (det->y1 + det->y2) * 0.5f;
         float distSq = (centerX - cx) * (centerX - cx) + (centerY - cy) * (centerY - cy);
 
         if (centerX < fovOffset || centerX > (captureSize - fovOffset) ||
             centerY < fovOffset || centerY > (captureSize - fovOffset)) {
             continue;
-            }
+        }
 
-        float score = det.confidence;
-        float area = (det.x2 - det.x1) * (det.y2 - det.y1);
-        score += area / (fov * fov) * 0.5f;
-        score -= distSq / maxDistSq * 0.3f;
+        float area = (det->x2 - det->x1) * (det->y2 - det->y1);
+        float score = det->confidence + (area / (fov * fov)) * 0.5f - (distSq / maxDistSq) * 0.3f;
 
         if (score > bestScore) {
-            best = &det;
             bestScore = score;
+            bestTarget = &target;
         }
     }
 
-    if (!best) return std::nullopt;
+    if (!bestTarget || !bestTarget->body) return std::nullopt;
 
-    // Use raw detection center coordinates
-    float centerX = (best->x1 + best->x2) * 0.5f;
-    float boxHeight = best->y2 - best->y1;
-    float aimY = best->class_id == 1 ? (best->y1 + best->y2) * 0.5f : best->y1 + boxHeight * 0.07f;
+    // Step 3: Aim point logic
+    float centerX = (bestTarget->body->x1 + bestTarget->body->x2) * 0.5f;
+    float height = bestTarget->body->y2 - bestTarget->body->y1;
+    float width  = bestTarget->body->x2 - bestTarget->body->x1;
+    float aimY;
 
-    cv::Point aimPoint(static_cast<int>(centerX), static_cast<int>(aimY));
-    // logger_.info("Selected detection: class={}, conf={:.2f}, aimPoint=({}, {}), score={:.2f}",
-    //             best->class_id, best->confidence, aimPoint.x, aimPoint.y, bestScore);
-    return aimPoint;
+    bool preferHead = keyWatcher_->IsFlickKeyDown();
+
+    // Body looks like a standalone head (used only if no grouped head)
+    bool looksLikeHeadAlone = !bestTarget->head &&
+                              width > 0 && height > 0 &&
+                              (height / width) >= 0.8f &&
+                              (height / width) <= 1.8f;
+
+    if (preferHead && bestTarget->head) {
+        // Flick mode + valid head
+        aimY = (bestTarget->head->y1 + bestTarget->head->y2) * 0.5f;
+    } else if (looksLikeHeadAlone) {
+        // No grouped head, but body looks like a head
+        aimY = (bestTarget->body->y1 + bestTarget->body->y2) * 0.5f;
+    } else {
+        // Default: aim near body top
+        aimY = bestTarget->body->y1 + height * 0.10f;
+    }
+
+    return cv::Point(static_cast<int>(centerX), static_cast<int>(aimY));
 }
 
-std::tuple<short, short> LogicManager::CalculateCoordinates(cv::Point target, const capkfa::RemoteConfigAim_Base& aimBase) {
+AimPoint LogicManager::CalculateCoordinates(cv::Point target, const capkfa::RemoteConfigGame_Base& aimBase) {
     /* ---------- Basic deltas ---------- */
     const int captureSize = remoteConfig_.capture().size();      // e.g. 256
-    const int fov         = remoteConfig_.aim().fov();
-    const int cx          = (remoteConfig_.mode() == capkfa::ObjectDetection ? captureSize : fov) / 2;
-    const int cy          = (remoteConfig_.mode() == capkfa::ObjectDetection ? captureSize : fov) / 2;
+    const int fov         = Fov();
+    const int cx          = captureSize / 2;
+    const int cy          = captureSize / 2;
 
-    const int offsetX = remoteConfig_.aim().offset_x();
-    const int offsetY = remoteConfig_.aim().offset_y();
+    const int offsetX = aimBase.offset_x();
+    const int offsetY = aimBase.offset_y();
 
     const int dx = target.x - cx + offsetX;
     const int dy = target.y - cy + offsetY;
+
+    const bool flickKey = keyWatcher_->IsFlickKeyDown();
+    const int pixelThreshold = 6;
+    const int cooldownMs = remoteConfig_.game().flick().delay();
+
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFlickTime_).count();
+
+    if (flickKey && elapsed >= cooldownMs && std::abs(dx) <= pixelThreshold && std::abs(dy) <= pixelThreshold) {
+        return AimPoint{
+            static_cast<short>(dx),
+            static_cast<short>(dy),
+            false  // no smoothing — instant
+        };
+    }
 
     /* ---------- Dead-zone ---------- */
     const float distSq          = static_cast<float>(dx * dx + dy * dy);
     constexpr float deadZoneRad = 2.0f;
     if (distSq < deadZoneRad * deadZoneRad)
-        return {0, 0};
+        return {0, 0, true};
 
     /* ---------- Smooth factor based on FOV weighting ---------- */
     const double distance     = std::sqrt(distSq);
-    const double maxDistance  = remoteConfig_.aim().fov() / 2.0;
+    const double maxDistance  = fov / 2.0;
     const double weight       = std::clamp(distance / maxDistance, 0.1, 1.0);
 
     const double smoothX =
@@ -353,75 +445,77 @@ std::tuple<short, short> LogicManager::CalculateCoordinates(cv::Point target, co
         moveY = std::clamp<int>(moveY, -15, 30);
     }
 
-    /* ---------- Recoil compensation (applied after smoothing) ---------- */
-    if (!keyWatcher_->IsFlickKeyDown() && remoteConfig_.aim().recoil().enabled()) {
-        const int duration = remoteConfig_.aim().recoil().duration(); // ms
-        const int factor   = remoteConfig_.aim().recoil().factor();   // %
-        constexpr int clampValue = 30;                                // safety
+    return AimPoint{
+        moveX, moveY, true
+    };
+}
+
+AimPoint LogicManager::CalculateRecoil(AimPoint point)
+{
+    if (!keyWatcher_->IsFlickKeyDown() && remoteConfig_.game().recoil().enabled()) {
+        const int duration = remoteConfig_.game().recoil().duration(); // ms
+        const int factor   = remoteConfig_.game().recoil().factor();   // %
+        const int delay    = remoteConfig_.game().recoil().delay();    // ms
 
         if (keyWatcher_->IsShotKeyDown()) {
-            if (!recoil_active_) {          // first shot
-                recoil_active_    = true;
-                recoil_start_time_ = std::chrono::steady_clock::now();
+            const auto now = std::chrono::steady_clock::now();
+
+            if (!recoil_active_) {
+                recoil_active_     = true;
+                recoil_start_time_ = now;
             }
 
-            const auto now      = std::chrono::steady_clock::now();
-            const auto elapsed  = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                     now - recoil_start_time_)
-                                     .count();
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - recoil_start_time_).count();
 
-            if (elapsed <= duration && !recoil_pattern_.empty()) {
-                const float t          = elapsed / static_cast<float>(duration);
-                const size_t n         = recoil_pattern_.size();
-                const float  fIdx      = t * (n - 1);
-                const size_t idx       = static_cast<size_t>(fIdx);
-                const float  frac      = fIdx - idx;
+            if (elapsed >= delay && elapsed <= duration && !recoil_pattern_.empty()) {
+                const float t     = (elapsed - delay) / static_cast<float>(duration - delay);
+                const size_t n    = recoil_pattern_.size();
+                const float fIdx  = t * (n - 1);
+                const size_t idx  = static_cast<size_t>(fIdx);
+                const float frac  = fIdx - idx;
 
-                /* linear-interpolated pattern value */
                 const float baseOffset = (idx < n - 1)
-                                             ? recoil_pattern_[idx] +
-                                                   frac * (recoil_pattern_[idx + 1] -
-                                                           recoil_pattern_[idx])
-                                             : recoil_pattern_.back();
+                    ? recoil_pattern_[idx] + frac * (recoil_pattern_[idx + 1] - recoil_pattern_[idx])
+                    : recoil_pattern_.back();
 
                 const float recoilOffset = baseOffset * (factor / 100.0f);
-                moveY += static_cast<short>(recoilOffset);
-                moveY  = std::clamp(moveY,
-                                   static_cast<short>(-clampValue),
-                                   static_cast<short>(clampValue));
-            } else {
-                recoil_active_ = false;     // finished pattern
+                point.y += static_cast<short>(recoilOffset);
+            }
+
+            if (elapsed > duration) {
+                recoil_active_ = false; // finished pattern
             }
         } else {
-            recoil_active_ = false;         // trigger released
+            recoil_active_ = false; // trigger released
         }
     }
 
-    return {moveX, moveY};
+    return point;
 }
 
-void LogicManager::HandleFlick(short moveX, short moveY) {
-    if (!keyWatcher_->IsFlickKeyDown()) return;
+void LogicManager::FlickMove(AimPoint point, bool instant)
+{
+    // Sensitivity
+    float sensitivity = remoteConfig_.game().flick().sensitivity();
 
-    static auto lastClick = std::chrono::steady_clock::now();
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastClick).count();
-
-    if (moveX > 5 && moveY > 5)
+    if (!point.smooth && instant)
     {
-        moveX = moveX/0.7;
-        moveY = moveY/0.7;
+        // Convert pixel coordinates to mouse units
+        point.x = point.x / sensitivity;
+        point.y = point.y / sensitivity;
     }
 
-    logger_.info("Flick moveX: {}, moveY: {}", moveX, moveY);
+    Move(point);
+}
 
-    if (moveX != 0 || moveY != 0) {
-        km_->Move(moveX, moveY);
-    }
-
-    if (elapsed > 300 && moveX == 0 && moveY == 0) {
+void LogicManager::HandleFlick(AimPoint point) {
+    if (!point.smooth) {
+        lastFlickTime_ = std::chrono::steady_clock::now();
+        FlickMove(point, true);
         km_->Click();
-        lastClick = now;
+        std::this_thread::sleep_for(std::chrono::milliseconds(250)); // debounce
+    } else {
+        FlickMove(point, false);
     }
 }
 
@@ -436,4 +530,21 @@ bool LogicManager::HasNvidiaGPU() {
     int device_count;
     cudaError_t err = cudaGetDeviceCount(&device_count);
     return err == cudaSuccess && device_count > 0;
+}
+
+void LogicManager::Move(AimPoint point)
+{
+    if (point.x == 0 && point.y == 0) {
+        return; // No movement needed
+    }
+
+    km_->Move(point.x, point.y);
+    int32_t inputDelay = remoteConfig_.game().input_delay();
+    if (inputDelay > 0) {
+        std::this_thread::sleep_for(std::chrono::microseconds(inputDelay));
+    }
+}
+
+int LogicManager::Fov() {
+    return keyWatcher_->IsFlickKeyDown() ? remoteConfig_.game().flick().base().fov() : remoteConfig_.game().aim().base().fov();
 }

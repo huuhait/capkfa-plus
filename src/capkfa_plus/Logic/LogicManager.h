@@ -18,6 +18,12 @@
 #include "YoloModel.h"
 #include "CudaModel.h"
 
+struct AimPoint
+{
+    short x, y;
+    bool smooth;
+};
+
 class LogicManager {
 public:
     LogicManager(
@@ -40,11 +46,15 @@ private:
     void DisplayFrame(const cv::Mat& frame, const std::string& windowName);
     void DrawDetections(cv::Mat& image, const std::vector<Detection>& detections, float confThreshold);
     std::optional<cv::Point> GetHighestMaskPoint();
-    std::optional<cv::Point> GetBiggestAimPoint(const std::vector<Detection>& detections, bool flick);
-    std::tuple<short, short> CalculateCoordinates(cv::Point target, const capkfa::RemoteConfigAim_Base& aimBase);
-    void HandleFlick(short moveX, short moveY);
+    std::optional<cv::Point> GetObjectDetectionAimPoint(const std::vector<Detection>& detections);
+    AimPoint CalculateCoordinates(cv::Point target, const capkfa::RemoteConfigGame_Base& aimBase);
+    AimPoint CalculateRecoil(AimPoint point);
+    void HandleFlick(AimPoint);
     std::vector<Detection> PredictYolo(std::shared_ptr<Frame>& frame);
+    void Move(AimPoint);
+    void FlickMove(AimPoint, bool);
     bool HasNvidiaGPU();
+    int Fov();
 
     spdlog::logger& logger_;
     std::shared_ptr<FrameSlot> frameSlot_;
@@ -54,7 +64,6 @@ private:
     std::unique_ptr<CudaModel> cudaModel_;
     ::capkfa::RemoteConfig remoteConfig_;
 
-    cv::Rect roi_;
     std::thread handlerThread_;
     std::atomic<bool> isRunning_;
     uint64_t lastFrameVersion_;
@@ -64,6 +73,8 @@ private:
     std::vector<float> recoil_pattern_ = {2.0f, 2.7f, 3.2f, 3.7f, 4.5f};
     bool recoil_active_;
     std::chrono::steady_clock::time_point recoil_start_time_;
+
+    std::chrono::steady_clock::time_point lastFlickTime_;
 };
 
 #endif

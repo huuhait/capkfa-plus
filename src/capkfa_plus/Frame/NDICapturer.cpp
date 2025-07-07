@@ -84,7 +84,7 @@ void NDICapturer::Start() {
             display_thread_.join();
         }
         io_thread_ = std::thread([this]() { ReadFrames(); });
-        display_thread_ = std::thread([this]() { DisplayFrames(); });
+        // display_thread_ = std::thread([this]() { DisplayFrames(); });
         logger_.info("FrameGrabber threads started");
     } catch (const std::exception& e) {
         running_ = false;
@@ -151,19 +151,13 @@ bool NDICapturer::FindSources(std::vector<std::pair<NDIlib_source_t, std::pair<i
         return false;
     }
 
-    std::string target_ip = remote_config_.capture().mode().source();
     for (uint32_t i = 0; i < source_count; ++i) {
         std::string url = sources[i].p_url_address ? sources[i].p_url_address : "";
         std::string name = sources[i].p_ndi_name ? sources[i].p_ndi_name : "";
-        if (url.find(target_ip) != std::string::npos || name.find(target_ip) != std::string::npos) {
-            // Add source without checking resolution
-            matching_sources.emplace_back(sources[i], std::make_pair(0, 0));
-            logger_.info("Found source: {}", name);
-        }
+        matching_sources.emplace_back(sources[i], std::make_pair(0, 0));
     }
 
     if (matching_sources.empty()) {
-        logger_.error("No sources found matching IP {}", target_ip);
         return false;
     }
 
@@ -253,7 +247,7 @@ void NDICapturer::ReadFrames() {
                 if (elapsed_ms >= 1000 && frame_count_ > 0) {
                     double fps = frame_count_ * 1000.0 / elapsed_ms;
                     double avg_process_ms = total_decode_time_ / static_cast<double>(frame_count_ * 1000);
-                    logger_.debug("Grabber FPS: {:.1f}, Avg process time: {:.2f}ms, Failed frames: {}",
+                    logger_.info("Grabber FPS: {:.1f}, Avg process time: {:.2f}ms, Failed frames: {}",
                                 fps, avg_process_ms, failed_frame_count_);
                     frame_count_ = 0;
                     total_decode_time_ = 0;

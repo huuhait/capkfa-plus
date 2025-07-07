@@ -1,5 +1,5 @@
 if(NOT DEFINED LOCKED_HWID)
-    set(LOCKED_HWID "7607025F02906BF47389225CBEF1EE69343B18B3089E7773DE95614BF25719B1")
+    set(LOCKED_HWID "FA2667E8F2F7EBE80260A7C1B68C0EBE82416B2F5F04650389D0DB27E63DB830")
 endif()
 
 message(STATUS "LOCKED_HWID: ${LOCKED_HWID}")
@@ -46,8 +46,6 @@ add_executable(CapkfaPlus
         Frame/Frame.h
         Frame/NDICapturer.cpp
         Frame/NDICapturer.h
-        Frame/MoonlightCapturer.cpp
-        Frame/MoonlightCapturer.h
         ${CMAKE_CURRENT_BINARY_DIR}/Config.h
 )
 
